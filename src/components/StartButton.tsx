@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
+import { Spinner } from "@/components/ui/spinner";
 
 const LoginButton = () => {
   const [user, setUser] = useState<any>(null);
@@ -23,12 +24,12 @@ const LoginButton = () => {
   }, [router]);
 
   return (
-    <Button className="w-70 h-20 text-4xl font-semibold bg-red-700"
+    <Button className="w-60 h-14 text-2xl font-medium bg-[#E7473C] cursor-pointer"
       onClick={() => {
         router.push("/login");
       }}
     >
-      START
+      Start
     </Button>
   );
 };

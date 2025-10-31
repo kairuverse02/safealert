@@ -29,7 +29,7 @@ export async function signup(formData: FormData) {
   const supabase = createClient();
 
   // type-casting here for convenience
-  // in practice, you should validate your inputs
+  // validate the inputs
   const firstName = formData.get("first-name") as string;
   const lastName = formData.get("last-name") as string;
   const data = {
@@ -83,3 +83,24 @@ export async function signInWithGoogle() {
 
   redirect(data.url);
 }
+
+export async function logInWithGoogle() {
+  const supabase = createClient();
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      queryParams: {
+        access_type: "offline",
+        prompt: "consent",
+      },
+    },
+  });
+
+  if (error) {
+    console.log(error);
+    redirect("/error");
+  }
+
+  redirect(data.url);
+}
+

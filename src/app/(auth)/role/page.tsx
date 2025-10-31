@@ -18,7 +18,7 @@ export default function RolePage() {
         <Button
           onClick={() => router.push('/admin')}
           className="flex-1 flex flex-col items-center gap-4 p-8 bg-neutral-900 hover:bg-neutral-900 
-          text-white rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg">
+          text-white rounded-xl transition-all duration-300 cursor-pointer transform hover:scale-105 shadow-lg">
           <div>
             <h2 className="text-2xl font-bold mb-2">As Guardian</h2>
           </div>
@@ -28,10 +28,10 @@ export default function RolePage() {
         <Button
           onClick={() => router.push('/client')}
           className="flex-1 flex flex-col items-center gap-4 p-8 bg-white-500 hover:bg-white
-          text-black ring-2 ring-neutral-900 ring-inset rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg"
+          text-black ring-2 ring-neutral-900 ring-inset rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg cursor-pointer"
         >
           <div>
-            <h2 className="text-2xl font-bold mb-2">As Dependancy</h2>
+            <h2 className="text-2xl font-bold mb-2">As Dependent  </h2>
           </div>
         </Button>
       </div>

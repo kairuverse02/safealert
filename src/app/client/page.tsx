@@ -1,11 +1,12 @@
-import React from 'react'
+import React from 'react';
+import ScanQr from './components/ScanQr';
 
-const page = () => {
+export default function Home(){
   return (
+    <>
     <div>
-      
+      <ScanQr/>
     </div>
-  )
+    </>
+  );
 }
-
-export default page

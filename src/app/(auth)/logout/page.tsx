@@ -9,8 +9,9 @@ const LogoutPage = () => {
         setTimeout(() => router.push('/'), 2000);
     }, []);
   return (
-    <div className='text-2xl items-center font-bold'>You have logged out... redirecting in a sec</div>
+    <div className='text-xl'>You have logged out... redirecting in a sec</div>
   )
 }
 
 export default LogoutPage;
+  

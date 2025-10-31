@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase/client';
 import { signout } from '@/lib/auth-actions';
+import { Spinner } from '@/components/ui/spinner';
 
 interface NavbarProps {
   user?: {
@@ -24,14 +25,20 @@ export default function Navbar({
   
   // State to track if dropdown is open or closed
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   
   // Reference to the dropdown element for click outside detection
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const handleSignOut = async () => {
-    await signout();
-    router.push('/');
-    setIsDropdownOpen(false);
+    try {
+      setIsSigningOut(true);
+      await signout();
+      router.push('/');
+    } finally {
+      setIsSigningOut(false);
+      setIsDropdownOpen(false);
+    }
   };
 
   // Toggle dropdown open/closed
@@ -66,7 +73,7 @@ export default function Navbar({
           
           {/* LEFT COLUMN: Logo */}
           <div>
-            <Link href="/admin"
+            <Link href="/client"
               className="flex gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded">
               {/* 💡 IconLogo */}
               <img 
@@ -123,13 +130,13 @@ export default function Navbar({
                   </div>
                 </div>
                 {/* MENU ITEMS */}
-                <Link href="/admin/profile"
+                <Link href="/client/account"
                   className="w-full flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                 >
                   <Settings size={18} className="mr-3 text-gray-500" />
                   <span>Account Settings</span>
                 </Link>
-                <Link href="/admin/settings"
+                <Link href="/client/settings"
                   className="w-full flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                 >
                   <FileText size={18} className="mr-3 text-gray-500" />
@@ -137,10 +144,15 @@ export default function Navbar({
                 </Link>
                 <button
                   onClick={handleSignOut}
-                  className="w-full flex items-center px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  disabled={isSigningOut}
+                  className="w-full flex items-center px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
                 >
-                  <LogOut size={18} className="mr-3" />
-                  <span>Signout</span>
+                  {isSigningOut ? (
+                    <Spinner className="mr-3 h-4 w-4" />
+                  ) : (
+                    <LogOut size={18} className="mr-3" />
+                  )}
+                  <span>{isSigningOut ? 'Signing out...' : 'Sign out'}</span>
                 </button>
               </div>
             )}
