@@ -5,7 +5,7 @@ import IconLogo from '@/../public/assets/iconlogo.png';
 import TextLogo from '@/../public/assets/textlogo.svg';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/utils/supabase/client';
+import { createClient } from '@/lib/supabase/client';
 import { signout } from '@/lib/auth-actions';
 import { Spinner } from '@/components/ui/spinner';
 

@@ -24,16 +24,18 @@ const SignInWithGoogleButton = () => {
     <Button
       type="button"
       variant="outline"
-      className="w-full hover:bg-neutral-200"
+      className="w-full hover:bg-neutral-200 cursor-pointer"
       onClick={handleGoogleSignIn}
-      disabled={isLoading}
-    >
+      disabled={isLoading}>
+      
       {isLoading ? (
-        <Spinner className="mr-2 h-4 w-4" />
+      <Spinner className="mr-2 h-4 w-4" />
       ) : (
         <Image src={GoogleIcon} alt="google-icon-logo" width={20} className="mr-2" />
       )}
+      
       {isLoading ? 'Signing in...' : 'Sign in with Google'}
+
     </Button>
   );
 };

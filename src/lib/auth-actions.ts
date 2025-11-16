@@ -2,14 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { Spinner } from "@/components/ui/spinner";
 
-import { createClient } from "@/utils/supabase/server";
+
+import { createClient } from "@/lib/supabase/server";
 
 export async function login(formData: FormData) {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   // type-casting here for convenience
-  // in practice, you should validate your inputs
   const data = {
     email: formData.get("email") as string,
     password: formData.get("password") as string,
@@ -20,15 +21,13 @@ export async function login(formData: FormData) {
   if (error) {
     redirect("/error");
   }
-
   revalidatePath("/role", "layout");
   redirect("/role");
 }
 
 export async function signup(formData: FormData) {
-  const supabase = createClient();
+  const supabase = await createClient();
 
-  // type-casting here for convenience
   // validate the inputs
   const firstName = formData.get("first-name") as string;
   const lastName = formData.get("last-name") as string;
@@ -48,13 +47,12 @@ export async function signup(formData: FormData) {
   if (error) {
     redirect("/error");
   }
-
   revalidatePath("/role", "layout");
   redirect("/role");
 }
 
 export async function signout() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { error } = await supabase.auth.signOut();
   if (error) {
     console.log(error);
@@ -65,7 +63,7 @@ export async function signout() {
 }
 
 export async function signInWithGoogle() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
@@ -85,7 +83,7 @@ export async function signInWithGoogle() {
 }
 
 export async function logInWithGoogle() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {

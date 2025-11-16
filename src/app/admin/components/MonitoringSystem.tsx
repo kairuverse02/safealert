@@ -351,12 +351,14 @@ export default function MonitoringSystem() {
   return (
     <>
       {/* Main container */}
-      <div className="w-full max-w-3xl mx-auto bg-gray-200 rounded-2xl shadow-2xl p-6 space-y-4">
+      <div className="w-full mx-auto max-w-6xl bg-[#F0F0F0] rounded-xl shadow-2xl border-2 border-solid border-black p-6 my-4 space-y-4">
         {/* Header */}
-        <p className="mt-1 text-center">{getStatusText()}</p>
+        <h1 className="text-center font-xl font-semibold">{getStatusText()}</h1>
 
+        {/* Video and Log Grid Container*/}
+        <div className="grid grid-cols-3">
         {/* Video/Canvas Area */}
-        <div className="relative w-full bg-gray-900 rounded-lg overflow-hidden flex items-center justify-center">
+        <div className="relative w-full rounded-tl-md rounded-bl-md bg-gray-900 overflow-hidden flex items-center justify-center col-span-2">
           <video
             ref={videoRef}
             className="absolute top-0 left-0 w-full h-full object-cover"
@@ -371,18 +373,30 @@ export default function MonitoringSystem() {
             onClick={handleCanvasClick}
           ></canvas>
           {!isCameraActive && (
-            <div className="absolute inset-0 bg-black bg-opacity-70 flex flex-col items-center justify-center text-center p-4 rounded-lg">
+            <div className="absolute inset-0 bg-black bg-opacity-70 text-white flex flex-col items-center justify-center text-center p-4 rounded-tl-md rounded-bl-md">
               <h2 className="text-2xl font-semibold mb-2">Welcome!</h2>
               <p>Click the "Start Camera" button below to begin.</p>
             </div>
           )}
+        </div>
+        {/* Event Log */}
+        <div className="bg-[#F0F0F0] border-2 border-solid border-black px-4 rounded-tr-md rounded-br-md h-100 overflow-y-auto">
+          <h3 className="font-semibold text-lg text-black text-center p-2 sticky top-0 bg-[#F0F0F0]">Event Log</h3>
+          <div className="space-y-1 text-sm">
+            {logEntries.length > 0 ? (
+              logEntries.map(getLogEntryUI)
+            ) : (
+              <p className="text-gray-500">No events yet.</p>
+            )}
+          </div>
+        </div>
         </div>
 
         {/* Controls Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <button
             onClick={handleStartStopCamera}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-all w-full"
+            className="bg-[#E7473C] hover:bg-red-500 text-white font-bold py-2 px-4 rounded-lg transition-all w-full"
           >
             {isCameraActive ? "Stop Camera" : "Start Camera"}
           </button>
@@ -462,20 +476,7 @@ export default function MonitoringSystem() {
             )}
           </div>
         </div>
-
-        {/* Event Log */}
-        <div className="bg-gray-900 p-4 rounded-lg h-32 overflow-y-auto">
-          <h3 className="font-semibold text-lg mb-2">Event Log</h3>
-          <div className="space-y-1 text-sm">
-            {logEntries.length > 0 ? (
-              logEntries.map(getLogEntryUI)
-            ) : (
-              <p className="text-gray-500">No events yet.</p>
-            )}
-          </div>
-        </div>
       </div>
-
       {/* Inline styles for alert flash */}
       <style>{`
         .alert-active {
