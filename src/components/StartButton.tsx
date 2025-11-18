@@ -3,7 +3,6 @@ import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Spinner } from "@/components/ui/spinner";
 
 const LoginButton = () => {
   const [user, setUser] = useState<any>(null);
