@@ -42,9 +42,9 @@ export default function QrScannerModal({ open, onClose }: QrScannerModalProps) {
       if (videoRef.current) {
         try {
           videoRef.current.pause()
-          // @ts-ignore
+          // @ts-expect-error - srcObject may not be defined in type
           videoRef.current.srcObject = null
-        } catch (e) {
+        } catch {
           // ignore
         }
       }

@@ -23,12 +23,12 @@ export default function MonitoringSystem() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastFrameDataRef = useRef<Uint8ClampedArray | null>(null);
   const animationFrameIdRef = useRef<number | null>(null);
+  const lastAlertTimeRef = useRef(0);
 
   const [currentMode, setCurrentMode] = useState<MonitoringMode>("idle");
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [patientMotionFrameCount, setPatientMotionFrameCount] = useState(0);
-  const [lastAlertTime, setLastAlertTime] = useState(0);
 
   const currentModeRef = useRef(currentMode);
   useEffect(() => {
@@ -41,36 +41,38 @@ export default function MonitoringSystem() {
   const triggerAlert = useCallback(
     (message: string, type: LogEntryType = "perimeter") => {
       const now = Date.now();
-      setLastAlertTime((prevTime) => {
-        if (
-          now - prevTime < ALERT_COOLDOWN &&
-          !["sos", "info", "error"].includes(type)
-        )
-          return prevTime;
+      const prevTime = lastAlertTimeRef.current;
+      
+      if (
+        now - prevTime < ALERT_COOLDOWN &&
+        !["sos", "info", "error"].includes(type)
+      ) {
+        return;
+      }
 
-        if (type !== "sos" && type !== "info") {
-          playSound(type as any); // Type assertion as playSound has stricter types
-        }
+      if (type !== "sos" && type !== "info") {
+        playSound(type as 'sound' | 'patient_motion' | 'error' | 'perimeter' | 'bathroom');
+      }
 
-        setLogEntries((prev) => [
-          {
-            id: Date.now() + Math.random(),
-            type,
-            message,
-            time: new Date().toLocaleTimeString(),
-          },
-          ...prev.slice(0, 19),
-        ]);
+      setLogEntries((prev) => [
+        {
+          id: Date.now() + Math.random(),
+          type,
+          message,
+          time: new Date().toLocaleTimeString(),
+        },
+        ...prev.slice(0, 19),
+      ]);
 
-        if (canvasRef.current) {
-          canvasRef.current.classList.add("alert-active");
-          setTimeout(
-            () => canvasRef.current?.classList.remove("alert-active"),
-            type === "sos" ? SOS_FLASH_INTERVAL : 1000
-          );
-        }
-        return now;
-      });
+      if (canvasRef.current) {
+        canvasRef.current.classList.add("alert-active");
+        setTimeout(
+          () => canvasRef.current?.classList.remove("alert-active"),
+          type === "sos" ? SOS_FLASH_INTERVAL : 1000
+        );
+      }
+      
+      lastAlertTimeRef.current = now;
     },
     [playSound]
   );
@@ -375,7 +377,7 @@ export default function MonitoringSystem() {
           {!isCameraActive && (
             <div className="absolute inset-0 bg-black bg-opacity-70 text-white flex flex-col items-center justify-center text-center p-4 rounded-tl-md rounded-bl-md">
               <h2 className="text-2xl font-semibold mb-2">Welcome!</h2>
-              <p>Click the "Start Camera" button below to begin.</p>
+              <p>Click the &quot;Start Camera&quot; button below to begin.</p>
             </div>
           )}
         </div>

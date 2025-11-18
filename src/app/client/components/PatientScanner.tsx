@@ -113,7 +113,7 @@ export default function PatientScanner() {
       pairDevice(decodedText);
     };
 
-    scanner.render(onScanSuccess, (err) => {/* ignore errors */});
+    scanner.render(onScanSuccess, () => {/* ignore errors */});
 
     // Cleanup
     return () => {
@@ -121,7 +121,7 @@ export default function PatientScanner() {
       channelRef.current?.unsubscribe();
       peerRef.current?.destroy();
     };
-  }, [isPaired, isPairing]); // Re-run if we disconnect
+  }, [isPaired, isPairing, pairDevice]); // Re-run if we disconnect
 
   // --- RENDER LOGIC ---
 

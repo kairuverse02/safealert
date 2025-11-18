@@ -51,7 +51,7 @@ import { LogEntry } from "@/types";
   
 
 const AlertsLog = () => {
-    const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+    const [logEntries] = useState<LogEntry[]>([]);
   return (
     <div>
       <div className='bg-blue-100 h-120'>

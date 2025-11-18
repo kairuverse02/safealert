@@ -21,7 +21,7 @@ export default function Navbar({
   user = { fName: 'John Doe', username: 'johndoe' },
 }: NavbarProps) {
   const router = useRouter();
-  const supabase = createClient();
+  // const supabase = createClient();
   
   // Track if dropdown is open or closed
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -84,15 +84,15 @@ export default function Navbar({
               className="flex gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded">
               {/* 💡 IconLogo */}
               <img 
-                src={(IconLogo as any).src || IconLogo} // Handle object/string import
+                src={typeof IconLogo === 'string' ? IconLogo : (IconLogo as { src: string }).src}
                 alt="Logo Icon" 
                 className="h-10 w-auto cursor-pointer"
               />
               {/* 💡 TextLogo */}
               <img 
-                src={(TextLogo as any).src || TextLogo} // Handle object/string import
+                src={typeof TextLogo === 'string' ? TextLogo : (TextLogo as { src: string }).src}
                 alt="Brand Name" 
-                className="h-8 w-auto cursor-pointer hidden sm:block" // Hide text on small screens if desired
+                className="h-8 w-auto cursor-pointer hidden sm:block"
               />
             </Link>
           </div>

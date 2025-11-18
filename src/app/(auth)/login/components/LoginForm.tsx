@@ -1,7 +1,7 @@
 'use client'
 import Link from "next/link"
 
-import React, { use, useState, useTransition } from "react";
+import React, {useState, useTransition } from "react";
 import { Button } from "@/components/ui/button"
 import {
   Card,

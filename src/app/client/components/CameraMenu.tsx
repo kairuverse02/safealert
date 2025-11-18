@@ -20,7 +20,7 @@ export default function CameraMenu() {
           videoRef.current.play();
         }
         setCamOn(true);
-      } catch (err) {
+      } catch {
         alert('Camera access denied or not available.');
       }
     } else {
@@ -46,7 +46,7 @@ export default function CameraMenu() {
           videoRef.current.play();
         }
         setMicOn(true);
-      } catch (err) {
+      } catch {
         alert('Microphone access denied or not available.');
       }
     } else {

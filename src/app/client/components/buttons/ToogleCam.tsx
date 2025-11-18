@@ -1,7 +1,7 @@
 'use client'
 import React from 'react'
 import { Button } from '@/components/ui/button'
-import { Video, VideoOff } from 'lucide-react';
+import { Video } from 'lucide-react';
 
 const ToogleCam = () => {
   return ( <Button>

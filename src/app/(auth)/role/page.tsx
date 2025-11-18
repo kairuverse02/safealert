@@ -1,7 +1,6 @@
 'use client'
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'next/navigation'
-import { Shield, User2 } from 'lucide-react'
 
 export default function RolePage() {
   const router = useRouter()

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import * as Tone from "tone";
 
 type SoundType = "sound" | "patient_motion" | "error" | "perimeter" | "bathroom";

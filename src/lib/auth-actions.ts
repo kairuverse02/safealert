@@ -2,8 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { Spinner } from "@/components/ui/spinner";
-
 
 import { createClient } from "@/lib/supabase/server";
 
