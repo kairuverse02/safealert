@@ -13,12 +13,17 @@ import {
 } from "@/lib/constants";
 import { detectMotion } from "@/lib/motion";
 import { useAudio } from "@/hooks/useAudio";
+import { createClient } from "@/lib/supabase/client";
 import { useCamera } from "@/hooks/useCamera";
 import { usePerimeter } from "@/hooks/usePerimeter";
 import { useSOS } from "@/hooks/useSOS";
 import { useSoundDetection } from "@/hooks/useSoundDetection";
 
-export default function MonitoringSystem() {
+type Props = {
+  pairingRoomId?: string | null;
+};
+
+export default function MonitoringSystem({ pairingRoomId }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastFrameDataRef = useRef<Uint8ClampedArray | null>(null);
@@ -289,6 +294,69 @@ export default function MonitoringSystem() {
   };
 
   // --- UI Rendering ---
+
+  // Supabase client for publishing perimeter and listening for dependent actions
+  const supabase = createClient();
+
+  // When entering perimeter monitoring, publish perimeter points to pairing row
+  useEffect(() => {
+    if (currentMode === "perimeter_monitoring" && pairingRoomId) {
+      // publish current perimeter points to DB so dependent can see them
+      (async () => {
+        try {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const w = canvas.width || 1;
+          const h = canvas.height || 1;
+          // normalize points to relative coordinates (0..1)
+          const normalized = perimeterPoints.map((p) => ({ x: p.x / w, y: p.y / h }));
+          try {
+            const resp = await fetch(`/api/signaling/${pairingRoomId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ perimeter_json: JSON.stringify(normalized) }),
+            });
+            const json = await resp.json();
+            if (!resp.ok) console.error('Failed to publish perimeter via API', json);
+          } catch (e) {
+            console.error('Failed to publish perimeter to pairing_rooms (exception)', e);
+          }
+        } catch (e) {
+          console.error("Failed to publish perimeter to pairing_rooms", e);
+        }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMode, pairingRoomId]);
+
+  // Subscribe to dependent actions (sos/bathroom) from pairing row
+  useEffect(() => {
+    if (!pairingRoomId) return;
+    const channel = supabase
+      .channel(`room-${pairingRoomId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "pairing_rooms", filter: `id=eq.${pairingRoomId}` },
+        (payload) => {
+          const action = payload.new.dependent_action;
+          if (action === "sos") {
+            triggerAlert("Dependent triggered SOS", "sos");
+          } else if (action === "bathroom") {
+            triggerAlert("Dependent requested bathroom", "bathroom");
+          } else if (payload.new.perimeter_json) {
+            // perimeter updates handled by client drawing already, no-op here
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try {
+        channel.unsubscribe();
+      } catch {}
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairingRoomId]);
   const getStatusText = () => {
     switch (currentMode) {
       case "idle":
@@ -371,7 +439,7 @@ export default function MonitoringSystem() {
           ></video>
           <canvas
             ref={canvasRef}
-            className="w-full h-100 cursor-crosshair"
+            className="absolute top-0 left-0 w-full h-full cursor-crosshair z-10"
             onClick={handleCanvasClick}
           ></canvas>
           {!isCameraActive && (

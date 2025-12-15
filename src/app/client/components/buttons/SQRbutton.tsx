@@ -1,10 +1,23 @@
 'use client'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { ScanQrCode } from 'lucide-react'
 import QrScannerModal from './QrScannerModal'
 
 const SQRbutton: React.FC = () => {
   const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    const handleQrScanned = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const roomId = customEvent.detail;
+      console.log('QR code or join code received:', roomId);
+      // Dispatch event so parent component can handle pairing
+      window.dispatchEvent(new CustomEvent('pairDevice', { detail: roomId }));
+    };
+
+    window.addEventListener('qrCodeScanned', handleQrScanned);
+    return () => window.removeEventListener('qrCodeScanned', handleQrScanned);
+  }, []);
 
   return (
     <>

@@ -1,8 +1,24 @@
-import React from 'react'
+'use client'
+import React, { useEffect } from 'react'
 import ScanQR from '@/../public/assets/ScanQR.png';
 import SQRbutton from './buttons/SQRbutton';
 import Image from 'next/image';
+
 const ScanQr = () => {
+    useEffect(() => {
+      const handlePairDevice = (event: Event) => {
+        const customEvent = event as CustomEvent;
+        const roomId = customEvent.detail;
+        console.log('Pairing with room ID:', roomId);
+        // Navigate or trigger pairing logic here
+        // For now, we'll use window location to navigate to PatientScanner with the room ID
+        window.location.href = `/client?pairWith=${encodeURIComponent(roomId)}`;
+      };
+
+      window.addEventListener('pairDevice', handlePairDevice);
+      return () => window.removeEventListener('pairDevice', handlePairDevice);
+    }, []);
+
     return (
         <div className="flex flex-col items-center justify-center gap-2 text-center px-4">
             <h1 className="text-[#E7473C] text-4xl font-bold w-full max-w-[1200px] mt-10">Scan To Pair</h1>

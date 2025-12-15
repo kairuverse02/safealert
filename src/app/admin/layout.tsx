@@ -13,13 +13,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <NavBar/>
-      <body>
-        <div className="contaier mx-auto px-4 sm:px-6 lg:px-8">
-          {children}
-        </div>
-      </body>
-    </html>
+    <>
+      <NavBar />
+      <div className="contaier mx-auto px-4 sm:px-6 lg:px-8">{children}</div>
+    </>
   );
 }

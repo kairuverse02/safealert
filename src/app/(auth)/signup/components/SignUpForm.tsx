@@ -89,6 +89,7 @@ export const SignUpForm: FC = () => {
 
   // State to hold the error messages, explicitly typed
   const [errors, setErrors] = useState<FormErrors>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // State for password visibility
   const [showPassword, setShowPassword] = useState(false);
@@ -144,7 +145,7 @@ export const SignUpForm: FC = () => {
   /**
    * Handles the form submission.
    */
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault(); // Prevent default form submission
 
     // --- Final validation check on all fields ---
@@ -162,7 +163,7 @@ export const SignUpForm: FC = () => {
     setErrors(newErrors); // Show all errors on submit attempt
 
     if (isValid) {
-      // If valid, create FormData and call the server action
+      setIsSubmitting(true);
       console.log("Form is valid, submitting to server action...");
       const formDataForServer = new FormData();
 
@@ -170,10 +171,13 @@ export const SignUpForm: FC = () => {
         formDataForServer.append(key, formData[key]);
       });
 
-      // Call your server action
-      // For a real app, you'd likely 'await' this in a try/catch
-      // and handle any errors returned from the server.
-      signup(formDataForServer);
+      try {
+        await signup(formDataForServer);
+      } catch (err) {
+        console.error('Signup error:', err);
+        setErrors({ email: (err as Error).message || 'Signup failed' });
+        setIsSubmitting(false);
+      }
     } else {
       console.log("Form has errors.", newErrors);
     }
@@ -326,8 +330,8 @@ export const SignUpForm: FC = () => {
             </div>
 
             {/* Remove `formAction` and just use `type="submit"` */}
-            <Button type="submit" className="w-full bg-[#E7473C]">
-              Create an account
+            <Button type="submit" className="w-full bg-[#E7473C]" disabled={isSubmitting}>
+              {isSubmitting ? 'Creating account...' : 'Create an account'}
             </Button>
           </div>
         </form>
