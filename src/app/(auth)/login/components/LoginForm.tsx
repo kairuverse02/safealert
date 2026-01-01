@@ -91,7 +91,7 @@ export function LoginForm() {
               className="w-full bg-[#E7473C] hover:bg-[#D9271B] cursor-pointer"
               disabled={isPending}>
               {isPending && ( <Spinner className="mr-2 h-4 w-4 animate-spin" />)}
-              {isPending ? 'Logging in...' : 'login'}
+              {isPending ? 'Logging in...' : 'Login'}
               </Button>
 
 

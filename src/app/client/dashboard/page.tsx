@@ -8,7 +8,7 @@ import React from 'react'
 
 const page = () => {
   return (
-    <div className='bg-red-100'>
+    <div className=''>
       <h1 className="text-[#E7473C] text-4xl font-bold w-full max-w-[1200px] mx-auto mt-10">Your Dashboard</h1>
         <div className='grid grid-cols-1 md:grid-cols-2 gap-4 max-w-[1200px] mx-auto mt-6 bg-neutral-200'>
             <CameraMenu/>

@@ -32,12 +32,12 @@ export default function ErrorPage() {
           )}
           <div className="pt-4 space-y-2">
             <Link href="/login" className="block">
-              <Button className="w-full bg-[#E7473C] hover:bg-[#D9271B]">
+              <Button className="w-full bg-[#E7473C] hover:bg-[#D9271B] cursor-pointer">
                 Back to Login
               </Button>
             </Link>
             <Link href="/signup" className="block">
-              <Button variant="outline" className="w-full">
+              <Button variant="outline" className="w-full cursor-pointer hover:bg-gray-200">
                 Sign Up
               </Button>
             </Link>
