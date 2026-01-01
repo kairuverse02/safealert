@@ -113,7 +113,6 @@ export default function Navbar({
             {isDropdownOpen && (
               <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg py-2 z-50 border border-gray-200">
                 
-                {/* FIRST ITEM: User Info */}
                 <div className="px-4 py-3 border-b border-gray-200">
                   <div className="flex items-start space-x-3">
                     <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold flex-shrink-0">
@@ -129,14 +128,14 @@ export default function Navbar({
                     </div>
                   </div>
                 </div>
-                {/* MENU ITEMS */}
+
                 <Link href="/client/account"
                   className="w-full flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                 >
                   <Settings size={18} className="mr-3 text-gray-500" />
                   <span>Account Settings</span>
                 </Link>
-                <Link href="/client/settings"
+                <Link href="/client/privacy"
                   className="w-full flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                 >
                   <FileText size={18} className="mr-3 text-gray-500" />

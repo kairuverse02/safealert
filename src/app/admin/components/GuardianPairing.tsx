@@ -183,54 +183,84 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
   }, []);
 
   return (
-    <div className="p-4 border rounded-md">
-      <h3 className="font-semibold mb-2">Guardian Pairing</h3>
+    <div className="p-4 border rounded-md bg-white shadow-md flex flex-col">
+      <div className="flex justify-between items-center mb-2">
+      <h3 className="font-semibold text-xl">Guardian Pairing</h3>
       {!roomId && (
         <button
-          className="bg-blue-600 text-white px-4 py-2 rounded"
-          onClick={createRoom}
+        className="bg-blue-600 text-white px-4 py-2 rounded cursor-pointer hover:bg-blue-700"
+        onClick={createRoom}
         >
-          Create Pairing Room
+        Create Pairing Room
         </button>
       )}
+      </div>
 
       {roomId && (
-        <div className="mt-3 space-y-2">
-          <p>
-            Share this Room ID with the dependent (scan or copy):
-            <strong className="ml-2 break-all">{roomId}</strong>
-          </p>
-          <div className="flex items-start gap-4">
-            <div className="bg-white p-2 rounded">
-              <QRCode value={roomId} size={128} />
+        <div className="mt-4 space-y-4">
+          {/* Room ID Display Section */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200">
+            <p className="text-sm font-medium text-gray-700 mb-2">Room ID</p>
+            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+              <div className="font-mono text-lg font-semibold text-blue-700 break-all flex-1">{roomId}</div>
+              <button
+                className="w-full sm:w-auto bg-blue-500 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-600 transition-colors font-medium text-sm"
+                onClick={() => navigator.clipboard.writeText(roomId)}
+              >
+                Copy ID
+              </button>
             </div>
-            <div className="flex-1">
-              <p className="text-sm text-gray-500">Waiting for dependent to connect...</p>
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                <div>
-                  <p className="text-xs font-semibold mb-1">Your Camera</p>
-                  <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-32 bg-black rounded" />
-                </div>
-                <div>
-                  <p className="text-xs font-semibold mb-1">Dependent View</p>
-                  <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-32 bg-black rounded" />
-                </div>
-              </div>
-              <div className="flex gap-2 mt-2">
-                <button
-                  className="bg-blue-500 text-white px-3 py-1 rounded"
-                  onClick={() => navigator.clipboard.writeText(roomId)}
-                >
-                  Copy ID
-                </button>
-                <button
-                  className="bg-red-500 text-white px-3 py-1 rounded"
-                  onClick={cleanup}
-                >
-                  Cancel
-                </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="flex flex-col items-center justify-center p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <p className="text-sm font-semibold text-gray-700 mb-3">Scan with dependent</p>
+              <div className="bg-white p-3 rounded-lg shadow-sm">
+                <QRCode value={roomId} size={150} />
               </div>
             </div>
+
+            <div className="flex flex-col justify-center items-center lg:items-start p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
+                <p className="font-semibold text-gray-800">Waiting for connection</p>
+              </div>
+              <p className="text-sm text-gray-600 text-center lg:text-left">
+                Share the Room ID or QR code with the dependent. They can scan the code or enter the ID to connect.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex flex-col">
+              <p className="text-sm font-semibold text-gray-700 mb-2">Your Camera</p>
+              <video 
+                ref={localVideoRef} 
+                autoPlay 
+                playsInline 
+                muted 
+                className="w-full aspect-video bg-black rounded-lg object-cover" 
+              />
+            </div>
+            <div className="flex flex-col">
+              <p className="text-sm font-semibold text-gray-700 mb-2">Dependent View</p>
+              <video 
+                ref={remoteVideoRef} 
+                autoPlay 
+                playsInline 
+                className="w-full aspect-video bg-black rounded-lg object-cover" 
+              />
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex gap-3 pt-2">
+            <button
+              className="flex-1 bg-red-500 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-red-600 transition-colors font-medium"
+              onClick={cleanup}
+            >
+              ✕ Cancel
+            </button>
           </div>
         </div>
       )}

@@ -12,13 +12,8 @@ export default function Home() {
     <>
       <div>
         <h1 className="text-neutral-950 text-3xl font-semibold w-full max-w-[1200px] mx-auto mt-10">Your Dashboard</h1>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="col-span-2">
-            {/* <MonitoringSystem pairingRoomId={pairingRoomId} /> */}
-          </div>
-          <div className="col-span-1">
-            <GuardianPairing onRoomCreated={(id: string) => setPairingRoomId(id)} />
-          </div>
+        <div className="mx-auto max-w-[1200px] mt-6">
+          <GuardianPairing onRoomCreated={(id: string) => setPairingRoomId(id)} />
         </div>
       </div>
     </>

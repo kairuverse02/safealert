@@ -11,7 +11,6 @@ const SQRbutton: React.FC = () => {
       const customEvent = event as CustomEvent;
       const roomId = customEvent.detail;
       console.log('QR code or join code received:', roomId);
-      // Dispatch event so parent component can handle pairing
       window.dispatchEvent(new CustomEvent('pairDevice', { detail: roomId }));
     };
 
@@ -23,7 +22,7 @@ const SQRbutton: React.FC = () => {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center justify-center gap-4 h-20 w-64 rounded-xl bg-[#E7473C] hover:bg-[#D9271B] text-white font-bold px-4 mt-12">
+        className="flex items-center justify-center gap-4 h-20 w-64 rounded-xl bg-[#E7473C] cursor-pointer hover:bg-[#D9271B] text-white font-bold px-4 mt-12">
         <div className='flex items-center gap-2'>
         <ScanQrCode size={48}/>
         <span className="text-3xl font-bold flex-end">CONNECT</span>

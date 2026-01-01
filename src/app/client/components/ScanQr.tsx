@@ -10,8 +10,6 @@ const ScanQr = () => {
         const customEvent = event as CustomEvent;
         const roomId = customEvent.detail;
         console.log('Pairing with room ID:', roomId);
-        // Navigate or trigger pairing logic here
-        // For now, we'll use window location to navigate to PatientScanner with the room ID
         window.location.href = `/client?pairWith=${encodeURIComponent(roomId)}`;
       };
 
