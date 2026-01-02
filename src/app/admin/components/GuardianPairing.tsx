@@ -16,11 +16,20 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [isWaiting, setIsWaiting] = useState(false);
   const [isPaired, setIsPaired] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const peerRef = useRef<Peer.Instance | null>(null);
   const channelRef = useRef<any>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    try {
+      console.log('[DBG] GuardianPairing mounted');
+    } catch (e) {
+      // noop
+    }
+  }, []);
 
   const createRoom = async () => {
     if (isWaiting) return;
@@ -53,12 +62,15 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
       const json = await resp.json();
       if (!resp.ok) {
         console.error('Failed to create room via API', json);
+        setErrorMsg(json?.error || 'Failed to create pairing room');
         setIsWaiting(false);
         return;
       }
       console.log('Room created via API:', id, json.data);
+      setErrorMsg(null);
     } catch (err) {
       console.error('Failed to create room (exception)', err);
+      setErrorMsg(String(err));
       setIsWaiting(false);
       return;
     }
@@ -203,13 +215,16 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
             <p className="text-sm font-medium text-gray-700 mb-2">Room ID</p>
             <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
               <div className="font-mono text-lg font-semibold text-blue-700 break-all flex-1">{roomId}</div>
-              <button
-                className="w-full sm:w-auto bg-blue-500 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-600 transition-colors font-medium text-sm"
-                onClick={() => navigator.clipboard.writeText(roomId)}
-              >
-                Copy ID
-              </button>
+              <div className="flex gap-2 mt-2 sm:mt-0">
+                <button
+                  className="w-full sm:w-auto bg-blue-500 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-600 transition-colors font-medium text-sm"
+                  onClick={() => navigator.clipboard.writeText(roomId)}
+                >
+                  Copy ID
+                </button>
+              </div>
             </div>
+            {errorMsg && <p className="text-sm text-red-600 mt-2">Error: {errorMsg}</p>}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

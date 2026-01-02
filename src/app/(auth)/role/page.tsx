@@ -15,7 +15,7 @@ export default function RolePage() {
       <div className="flex flex-col sm:flex-row gap-6 w-full max-w-2xl px-4">
         {/* Admin Button */}
         <Button
-          onClick={() => router.push('/admin')}
+          onClick={async () => { try { router.push('/admin') } catch (e) { console.error('Error selecting role', e); alert('Error selecting role: ' + String(e)); } }}
           className="flex-1 flex flex-col items-center gap-4 p-8 bg-neutral-900 hover:bg-neutral-900 
           text-white rounded-xl transition-all duration-300 cursor-pointer transform hover:scale-105 shadow-lg">
           <div>
@@ -25,7 +25,7 @@ export default function RolePage() {
 
         {/* Client Button */}
         <Button
-          onClick={() => router.push('/client')}
+          onClick={async () => { try { router.push('/client') } catch (e) { console.error('Error selecting role', e); alert('Error selecting role: ' + String(e)); } }}
           className="flex-1 flex flex-col items-center gap-4 p-8 bg-white-500 hover:bg-white
           text-black ring-2 ring-neutral-900 ring-inset rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg cursor-pointer"
         >

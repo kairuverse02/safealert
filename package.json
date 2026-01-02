@@ -26,6 +26,7 @@
     "react-dom": "19.1.0",
     "react-hook-form": "^7.64.0",
     "react-qr-code": "^2.0.18",
+    "qrcode": "^1.5.1",
     "simple-peer": "^9.11.1",
     "tailwind-merge": "^3.3.1",
     "tone": "^15.1.22",
