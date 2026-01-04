@@ -1,4 +1,4 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+SAFEAlert is a small Next.js application that demonstrates simple WebRTC pairing and monitoring between a guardian and a dependent using Supabase for signaling and persistence.
 
 ## Getting Started
 
@@ -15,6 +15,49 @@ bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+---
+
+## Quick start (local) ⚙️
+
+1. Copy environment variables:
+
+```bash
+cp .env.example .env.local
+```
+
+2. Fill in the Supabase values in `.env.local` (see `.env.example`).
+
+3. Create the `pairing_rooms` table in your Postgres instance (see `db/create_pairing_rooms.sql`).
+
+4. Install and run locally:
+
+```bash
+npm install
+npm run dev
+```
+
+---
+
+## Project overview 🔧
+
+- **Stack:** Next.js (app router), React, TypeScript, Tailwind CSS.
+- **Signaling:** Supabase JSONB `pairing_rooms` table used to persist `offer_signal` and `answer_signal` (supports trickle ICE).
+
+---
+
+## Debugging tips & notes 🐞
+
+- If pairing fails with `InvalidAccessError` about m-line ordering or `InvalidStateError` when setting the remote description, look for these in the browser console and server logs:
+  - On the dependent (patient), we now publish answers with `audio: false` initially to avoid m-line reorder issues.
+  - The server PATCH merges candidate-only updates into the existing `answer_signal` and preserves `sdp` to avoid overwriting the answer with candidate-only payloads.
+  - The guardian applies polled answers only when `sdp` is present and avoids re-applying an identical SDP (idempotent application).
+
+---
+
+## License
+
+MIT — see `LICENSE` if present.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
