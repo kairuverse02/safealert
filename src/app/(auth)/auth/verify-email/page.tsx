@@ -20,7 +20,7 @@ export default function VerifyEmailPage() {
           
           <div className="pt-4 space-y-2">
             <p className="text-xs text-gray-500">
-              Didn't receive an email? Check your spam folder or try signing up again.
+              Didn&apos;t receive an email? Check your spam folder or try signing up again.
             </p>
             <Link href="/signup">
               <Button variant="outline" className="w-full">

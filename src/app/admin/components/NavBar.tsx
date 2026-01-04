@@ -1,11 +1,9 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'; // ✨ FIX: Imported useEffect
 import { User, Settings, LogOut,  FileText } from 'lucide-react';
-import IconLogo from '@/../public/assets/iconlogo.png';
-import TextLogo from '@/../public/assets/textlogo.svg';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 import { signout } from '@/lib/auth-actions';
 import { Spinner } from '@/components/ui/spinner';
 
@@ -83,15 +81,19 @@ export default function Navbar({
             <Link href="/admin"
               className="flex gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded">
               {/* 💡 IconLogo */}
-              <img 
-                src={typeof IconLogo === 'string' ? IconLogo : (IconLogo as { src: string }).src}
-                alt="Logo Icon" 
+              <Image
+                src="/assets/iconlogo.png"
+                alt="Logo Icon"
+                width={40}
+                height={40}
                 className="h-10 w-auto cursor-pointer"
               />
               {/* 💡 TextLogo */}
-              <img 
-                src={typeof TextLogo === 'string' ? TextLogo : (TextLogo as { src: string }).src}
-                alt="Brand Name" 
+              <Image
+                src="/assets/textlogo.svg"
+                alt="Brand Name"
+                width={120}
+                height={32}
                 className="h-8 w-auto cursor-pointer hidden sm:block"
               />
             </Link>
@@ -112,14 +114,17 @@ export default function Navbar({
                 >
                   <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold hover:bg-blue-600 transition-colors">
                     {user.avatarUrl ? (
-                      <img 
-                        src={user.avatarUrl} 
-                        alt="Profile" 
+                      <Image
+                        src={user.avatarUrl}
+                        alt="Profile"
+                        width={40}
+                        height={40}
+                        unoptimized
                         className="h-10 w-10 rounded-full object-cover"
                       />
                     ) : (
                       <User size={26} />
-                    )}
+                    )} 
                   </div>
                 </button>
 

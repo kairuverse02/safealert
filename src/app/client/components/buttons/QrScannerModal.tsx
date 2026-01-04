@@ -18,6 +18,7 @@ export default function QrScannerModal({ open, onClose }: QrScannerModalProps) {
     if (!open) return
 
     let mounted = true
+    let currentVideo: HTMLVideoElement | null = null;
 
     async function startCamera() {
       try {
@@ -27,6 +28,7 @@ export default function QrScannerModal({ open, onClose }: QrScannerModalProps) {
         if (videoRef.current) {
           videoRef.current.srcObject = stream
           await videoRef.current.play()
+          currentVideo = videoRef.current
         }
       } catch (err) {
         console.error('Could not start camera', err)
@@ -37,15 +39,15 @@ export default function QrScannerModal({ open, onClose }: QrScannerModalProps) {
 
     return () => {
       mounted = false
+      const v = currentVideo;
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop())
         streamRef.current = null
       }
-      if (videoRef.current) {
+      if (v) {
         try {
-          videoRef.current.pause()
-          // @ts-expect-error - srcObject may not be defined in type
-          videoRef.current.srcObject = null
+          v.pause();
+          (v as HTMLVideoElement).srcObject = null
         } catch {
           // ignore
         }

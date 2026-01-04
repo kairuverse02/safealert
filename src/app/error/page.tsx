@@ -1,14 +1,23 @@
 'use client';
 
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
 export default function ErrorPage() {
-  const searchParams = useSearchParams();
-  const message = searchParams.get('message') || 'An error occurred. Please try again.';
-  const reason = searchParams.get('reason');
+  const [message, setMessage] = useState('An error occurred. Please try again.');
+  const [reason, setReason] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const m = params.get('message');
+      const r = params.get('reason');
+      if (m) setMessage(m);
+      if (r) setReason(r);
+    }
+  }, []);
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-100">

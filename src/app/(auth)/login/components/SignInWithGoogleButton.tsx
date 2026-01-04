@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import { signInWithGoogle } from "@/lib/auth-actions";
 import React, { useState } from "react";
 import Image from "next/image";
-import GoogleIcon from '../../../../../public/assets/googleicon.png';
 import { Spinner } from "@/components/ui/spinner";
 
 const SignInWithGoogleButton = () => {
@@ -31,7 +30,7 @@ const SignInWithGoogleButton = () => {
       {isLoading ? (
       <Spinner className="mr-2 h-4 w-4" />
       ) : (
-        <Image src={GoogleIcon} alt="google-icon-logo" width={20} className="mr-2" />
+        <Image src="/assets/googleicon.png" alt="google-icon-logo" width={20} height={20} className="mr-2" />
       )}
       
       {isLoading ? 'Signing in...' : 'Sign in with Google'}

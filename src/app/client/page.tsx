@@ -1,12 +1,17 @@
 "use client"
-import React from 'react'
-import { useSearchParams } from 'next/navigation'
+import React, { useEffect, useState } from 'react'
 import ScanQr from './components/ScanQr';
 import PatientScanner from './components/PatientScanner';
 
 export default function Home(){
-  const searchParams = useSearchParams();
-  const pairWithId = searchParams.get('pairWith');
+  const [pairWithId, setPairWithId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      setPairWithId(params.get('pairWith'));
+    }
+  }, []);
 
   return (
     <>

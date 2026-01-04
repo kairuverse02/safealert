@@ -5,8 +5,7 @@ import QRCode from "react-qr-code";
 import Peer from "simple-peer";
 import { v4 as uuidv4 } from "uuid";
 import { createClient } from "@/lib/supabase/client";
-
-const supabase = createClient();
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 type Props = {
   onRoomCreated?: (id: string) => void;
@@ -17,16 +16,45 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
   const [isWaiting, setIsWaiting] = useState(false);
   const [isPaired, setIsPaired] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isMonitoring, setIsMonitoring] = useState<boolean>(false);
   const peerRef = useRef<Peer.Instance | null>(null);
-  const channelRef = useRef<any>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const answerPollRef = useRef<number | null>(null); // interval id for polling answer as a fallback
+  const hasStartedPollingRef = useRef(false);
+  // Track whether an answer SDP has already been applied to avoid duplicate signaling
+  const hasAppliedAnswerRef = useRef(false);
+  const lastAppliedAnswerSdpRef = useRef<string | null>(null);
+
+  // Send a start/stop monitoring request to the dependent by patching the pairing row
+  const sendMonitoringRequest = async (start: boolean) => {
+    if (!roomId) return;
+    try {
+      const action = start ? 'start_monitor' : 'stop_monitor';
+      const resp = await fetch(`/api/signaling/${roomId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dependent_action: action }),
+      });
+      const json = await resp.json().catch(() => null);
+      console.log('Monitoring request response', resp.status, json);
+      if (!resp.ok) {
+        console.error('Failed to send monitoring request', json);
+        return;
+      }
+      console.log('Monitoring request sent', action, json?.data || json);
+      setIsMonitoring(start);
+    } catch (err) {
+      console.error('Failed to send monitoring request (exception)', err);
+    }
+  };
 
   useEffect(() => {
     try {
       console.log('[DBG] GuardianPairing mounted');
-    } catch (e) {
+    } catch {
       // noop
     }
   }, []);
@@ -75,9 +103,11 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
       return;
     }
 
+    const supabase = createClient();
+
     const peer = new Peer({
       initiator: true,
-      trickle: false,
+      trickle: true,
       stream: localStream,
       config: {
         iceServers: [
@@ -87,39 +117,145 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
     });
     peerRef.current = peer;
 
-    peer.on("signal", async (offer: any) => {
+    peer.on("signal", async (offer: unknown) => {
       try {
-        console.log('Guardian: signal event, sending offer/ice candidate to API', offer && (offer.type || (offer.candidate ? 'candidate' : 'signal')));
-        const resp = await fetch(`/api/signaling/${id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ offer_signal: offer }),
-        });
-        const json = await resp.json();
-        if (!resp.ok) {
-          console.error('Failed to publish offer via API', json);
-          return;
+        console.log('Guardian: signal payload', offer);
+        // Determine a short descriptor for logging
+        let desc = 'signal';
+        if (offer && typeof offer === 'object') {
+          const o = offer as Record<string, unknown>;
+          if (typeof o['type'] === 'string') desc = o['type'] as string;
+          else if (o['candidate']) desc = 'candidate';
         }
-        console.log('Offer published to pairing_rooms via API', id, json.data);
-      } catch (err) {
+        console.log('Guardian: signal event (desc)', desc);
+
+        // Only persist initial SDP offer to DB to avoid it being overwritten by later candidate-only signals
+        const isOffer = !!(offer && typeof offer === 'object' && (offer as Record<string, unknown>)['type'] === 'offer');
+        if (!isOffer) {
+          console.log('Guardian: skipping DB PATCH for non-offer signal to avoid overwriting offer', desc);
+        } else {
+          console.log('Guardian: sending offer (persisting to DB)');
+          const resp = await fetch(`/api/signaling/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ offer_signal: offer }),
+          });
+          const json = await resp.json().catch(() => null);
+          console.log('Guardian: publish offer response', resp.status, json);
+          if (!resp.ok) {
+            console.error('Failed to publish offer via API', json);
+            return;
+          }
+          console.log('Offer published to pairing_rooms via API', id, json?.data);
+
+          // Start a fallback poll to detect answers in case realtime subscriptions miss the update
+          if (!hasStartedPollingRef.current) {
+            hasStartedPollingRef.current = true;
+            answerPollRef.current = window.setInterval(async () => {
+              try {
+                const resp = await fetch(`/api/signaling/${id}`);
+                const js = await resp.json().catch(() => null);
+                console.log('Guardian: poll for answer response', resp.status, js);
+                if (resp.ok && js?.data?.answer_signal && peerRef.current) {
+                  const ans = js.data.answer_signal;
+                  // Prefer applying only when an SDP string is present to avoid applying empty 'answer' objects
+                  const hasSdp = !!(ans && typeof ans.sdp === 'string' && ans.sdp.length > 0);
+                  if (hasSdp) {
+                    const sdp = ans.sdp as string;
+                    // Apply only if we haven't applied an answer yet, or the SDP changed
+                    if (!hasAppliedAnswerRef.current || lastAppliedAnswerSdpRef.current !== sdp) {
+                      try {
+                        console.log('Guardian: found answer via poll (sdp present), signaling peer', ans);
+                        peerRef.current.signal(ans);
+                        hasAppliedAnswerRef.current = true;
+                        lastAppliedAnswerSdpRef.current = sdp;
+                      } catch (err) {
+                        console.warn('Guardian: failed to apply polled answer', err);
+                      }
+                    } else {
+                      console.log('Guardian: polled answer SDP already applied, will process candidates only', ans.candidates || ans.candidate);
+                    }
+
+                    // Also apply any candidates included in the update (do not reapply full answer if SDP is same)
+                    const candidates = ans.candidates || ans.candidate ? (ans.candidates || [ans.candidate]) : [];
+                    if (Array.isArray(candidates) && candidates.length > 0) {
+                      candidates.forEach((c: any) => {
+                        try {
+                          peerRef.current?.signal({ type: 'candidate', candidate: c });
+                        } catch (e) {
+                          console.warn('Failed to signal candidate from poll', e);
+                        }
+                      });
+                    }
+
+                    // We can stop polling after we've applied the answer + candidates
+                    if (answerPollRef.current) {
+                      clearInterval(answerPollRef.current);
+                      answerPollRef.current = null;
+                    }
+                  } else {
+                    console.log('Guardian: poll found only candidates or transceiver requests (no sdp yet), continuing to poll and will apply once answer SDP appears', ans);
+                    // continue polling
+                  }
+                }
+              } catch (err) {
+                console.warn('Guardian: poll for answer failed', err);
+              }
+            }, 1000);
+          }
+        }      } catch (err) {
         console.error('Failed to publish offer (exception)', err);
       }
     });
 
     peer.on('error', (err) => {
       console.error('Guardian peer error', err);
+      // If this looks like the m-line order mismatch, fetch and log offer/answer m-line counts to help debugging
+      try {
+        const msg = err && err.toString ? err.toString() : String(err);
+        if (msg.includes('order of m-lines')) {
+          (async () => {
+            try {
+              const resp = await fetch(`/api/signaling/${id}`);
+              const js = await resp.json().catch(() => null);
+              console.warn('Guardian: m-line mismatch detected. Current room state:', js?.data || js);
+              const offer = js?.data?.offer_signal;
+              const answer = js?.data?.answer_signal;
+              const ocount = offer && typeof offer.sdp === 'string' ? (offer.sdp.match(/^m=/gm) || []).length : null;
+              const acount = answer && typeof answer.sdp === 'string' ? (answer.sdp.match(/^m=/gm) || []).length : null;
+              console.warn('Guardian: offer m-lines:', ocount, 'answer m-lines:', acount);
+            } catch (e) {
+              console.warn('Guardian: failed fetching room state for m-line diagnostic', e);
+            }
+          })();
+        }
+      } catch (e) {
+        // noop
+      }
     });
 
     // Attach connection state logging if underlying RTCPeerConnection is available
     peer.on('connect', () => {
       console.log('Guardian: peer.connect event');
     });
-    // @ts-ignore - access underlying RTCPeerConnection for diagnostics
-    const guardianPc: RTCPeerConnection | undefined = (peer as any)?._pc;
-    if (guardianPc) {
-      guardianPc.oniceconnectionstatechange = () => console.log('Guardian PC ICE state:', guardianPc.iceConnectionState);
-      guardianPc.onconnectionstatechange = () => console.log('Guardian PC connection state:', (guardianPc as any).connectionState || guardianPc.iceConnectionState);
-    }
+
+    // Attach RTCPeerConnection handlers when the underlying PC becomes available (polling once)
+    const attachPcHandlers = (p: Peer.Instance) => {
+      const tryAttach = () => {
+        const pc = (p as unknown as { _pc?: RTCPeerConnection })?._pc;
+        if (pc) {
+          pc.oniceconnectionstatechange = () => console.log('Guardian PC ICE state:', pc.iceConnectionState);
+          pc.onconnectionstatechange = () => {
+            const connState = (pc as any).connectionState || pc.iceConnectionState;
+            console.log('Guardian PC connection state:', connState);
+          };
+        } else {
+          setTimeout(tryAttach, 200);
+        }
+      };
+      tryAttach();
+    };
+    attachPcHandlers(peer);
 
     // Listen for answer signal updates
     channelRef.current = supabase
@@ -132,11 +268,57 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
           table: "pairing_rooms",
           filter: `id=eq.${id}`,
         },
-        (payload) => {
+        (payload: { new: { answer_signal?: any } }) => {
           const answer = payload.new.answer_signal;
-          if (answer && peerRef.current) {
-            console.log("Received answer, signaling peer");
-            peerRef.current.signal(answer);
+          if (!answer || !peerRef.current) return;
+
+          try {
+            // If answer contains an 'sdp' (type === 'answer') signal it first
+            if (answer.type === 'answer' || answer.sdp) {
+              const sdp = answer.sdp as string | undefined;
+              if (!hasAppliedAnswerRef.current || (sdp && lastAppliedAnswerSdpRef.current !== sdp)) {
+                console.log('Received full answer via realtime, signaling peer');
+                try {
+                  // signal the main answer
+                  peerRef.current.signal(answer as Peer.SignalData | string);
+                  if (sdp) {
+                    hasAppliedAnswerRef.current = true;
+                    lastAppliedAnswerSdpRef.current = sdp;
+                  }
+                } catch (e) {
+                  console.warn('Failed to signal full answer via realtime', e);
+                }
+              } else {
+                console.log('Realtime: answer SDP already applied, will only apply candidates if present');
+              }
+
+              // if candidates array present, signal them after a tiny delay
+              const candidates = answer.candidates || answer.candidate ? (answer.candidates || [answer.candidate]) : [];
+              if (Array.isArray(candidates) && candidates.length > 0) {
+                setTimeout(() => {
+                  candidates.forEach((c: any) => {
+                    try {
+                      peerRef.current?.signal({ type: 'candidate', candidate: c });
+                    } catch (e) {
+                      console.warn('Failed to signal candidate', e);
+                    }
+                  });
+                }, 50);
+              }
+            } else if (answer.type === 'candidates' && Array.isArray(answer.candidates)) {
+              console.log('Received candidates array via realtime');
+              answer.candidates.forEach((c: any) => peerRef.current?.signal({ type: 'candidate', candidate: c }));
+            } else {
+              // fallback: single candidate or other signals
+              console.log('Received signal via realtime, passing through', answer.type || 'signal');
+              try {
+                peerRef.current.signal(answer as Peer.SignalData | string);
+              } catch (e) {
+                console.warn('Failed to signal runtime fallback signal', e);
+              }
+            }
+          } catch (err) {
+            console.error('Failed to apply incoming answer_signal', err);
           }
         }
       )
@@ -148,9 +330,19 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
       setIsPaired(true);
     });
 
+
+
     peer.on("stream", (stream: MediaStream) => {
+      console.log('Guardian: got remote stream');
       if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = stream;
+        try {
+          remoteVideoRef.current.srcObject = stream;
+          // mute to allow autoplay in most browsers; user may unmute later if desired
+          remoteVideoRef.current.muted = true;
+          remoteVideoRef.current.play().catch((e) => console.warn('Guardian remote video play failed', e));
+        } catch (e) {
+          console.warn('Guardian: failed to attach remote stream', e);
+        }
       }
     });
 
@@ -189,6 +381,11 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
 
   useEffect(() => {
     return () => {
+      // Clear any polling interval on unmount
+      if (answerPollRef.current) {
+        clearInterval(answerPollRef.current);
+        answerPollRef.current = null;
+      }
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -263,6 +460,7 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
                 ref={remoteVideoRef} 
                 autoPlay 
                 playsInline 
+                muted 
                 className="w-full aspect-video bg-black rounded-lg object-cover" 
               />
             </div>
@@ -276,6 +474,14 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
             >
               ✕ Cancel
             </button>
+            {!isPaired ? null : (
+              <button
+                className={`flex-1 ${isMonitoring ? 'bg-gray-500 hover:bg-gray-600' : 'bg-green-600 hover:bg-green-700'} text-white px-4 py-2 rounded-lg cursor-pointer transition-colors font-medium`}
+                onClick={() => sendMonitoringRequest(!isMonitoring)}
+              >
+                {isMonitoring ? 'Stop Monitoring' : 'Start Monitoring'}
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -4,13 +4,13 @@ import { createServiceClient } from '@/lib/supabase/service'
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const id = body?.id || (globalThis.crypto?.randomUUID ? crypto.randomUUID() : undefined)
+    const id = body?.id || globalThis.crypto?.randomUUID?.();
     if (!id) return NextResponse.json({ error: 'Missing id and crypto.randomUUID unsupported' }, { status: 400 })
 
     const supabase = createServiceClient()
     const { data, error } = await supabase.from('pairing_rooms').insert({ id, offer_signal: null, answer_signal: null }).select()
     if (error) {
-      const msg = (error && (error.message || error.msg)) || JSON.stringify(error)
+      const msg = (error && error.message) || JSON.stringify(error)
       return NextResponse.json({ error: msg }, { status: 500 })
     }
     return NextResponse.json({ data }, { status: 201 })
@@ -24,7 +24,7 @@ export async function GET() {
     const supabase = createServiceClient()
     const { data, error } = await supabase.from('pairing_rooms').select('*')
     if (error) {
-      const msg = (error && (error.message || error.msg)) || JSON.stringify(error)
+      const msg = (error && error.message) || JSON.stringify(error)
       return NextResponse.json({ error: msg }, { status: 500 })
     }
     return NextResponse.json({ data })

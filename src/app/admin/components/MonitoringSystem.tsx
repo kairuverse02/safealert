@@ -337,7 +337,7 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "pairing_rooms", filter: `id=eq.${pairingRoomId}` },
-        (payload) => {
+        (payload: { new: { dependent_action?: string; perimeter_json?: string } }) => {
           const action = payload.new.dependent_action;
           if (action === "sos") {
             triggerAlert("Dependent triggered SOS", "sos");

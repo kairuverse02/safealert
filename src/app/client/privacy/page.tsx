@@ -17,7 +17,7 @@ const page = () => {
         <div className="mb-16">
           <h2 className="text-3xl font-bold text-gray-900 mb-4">FULL PRIVACY POLICY</h2>
           <p className="text-base text-gray-700 leading-relaxed">
-            This Privacy Policy explains how SafeAlert: Web-Based Human Monitoring System with Perimeter Detection ("SafeAlert," "we," "us," "our")
+            This Privacy Policy explains how SafeAlert: Web-Based Human Monitoring System with Perimeter Detection (&quot;SafeAlert,&quot; &quot;we,&quot; &quot;us,&quot; &quot;our&quot;)
             collects, uses, stores, and protects information from its users and monitored subjects, in full compliance with the Data Privacy Act of 2012 (RA 10173).
           </p>
         </div>
@@ -81,7 +81,7 @@ const page = () => {
               <ul className="list-disc list-inside space-y-2 mb-4 text-gray-700">
                 <li className="text-base">One-time QR token generated during device pairing</li>
               </ul>
-              <p className="text-base text-gray-600 italic">Purpose: Securely link the device to the user's account.</p>
+              <p className="text-base text-gray-600 italic">Purpose: Securely link the device to the user&apos;s account.</p>
               <p className="text-base text-gray-600 italic mt-2">Note: Token is immediately invalidated after a successful pairing.</p>
             </div>
           </div>

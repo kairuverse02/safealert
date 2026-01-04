@@ -1,6 +1,5 @@
 'use client'
 import React, { useEffect } from 'react'
-import ScanQR from '@/../public/assets/ScanQR.png';
 import SQRbutton from './buttons/SQRbutton';
 import Image from 'next/image';
 
@@ -24,8 +23,10 @@ const ScanQr = () => {
                 To Connect, Scan The QR Code From Your Guardian&apos;s device.
             </h3>
             <Image
-                src={ScanQR}
+                src="/assets/ScanQR.png"
                 alt="QR Code"
+                width={180}
+                height={180}
                 className="h-50 w-180 object-contain mx-auto mt-10"/>
             <SQRbutton />
         </div>
