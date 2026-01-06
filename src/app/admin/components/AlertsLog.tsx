@@ -54,18 +54,11 @@ const AlertsLog = () => {
     const [logEntries] = useState<LogEntry[]>([]);
   return (
     <div>
-      <div className='bg-blue-100 h-120'>
-        <h1 className='text-neutral-950 font-semibold text-xl text-center '>
+      <div className='bg-neutral-200 h-[440px]'>
+        <h1 className='pl-2 text-black font-semibold text-lg '>
         Events Log
         </h1>
-        <h3 className="font-semibold text-lg mb-2">Event Log</h3>
-          <div className="space-y-1 text-sm">
-            {logEntries.length > 0 ? (
-              logEntries.map(getLogEntryUI)
-            ) : (
-              <p className="text-gray-500">No events yet.</p>
-          )}
-        </div>
+
       </div>
     </div>
   )

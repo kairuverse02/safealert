@@ -1,6 +1,7 @@
-"use client"; // VERY IMPORTANT! This enables hooks and browser APIs
+"use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import jsPDF from "jspdf";
 import { LogEntry, LogEntryType, MonitoringMode, Point } from "@/types";
 import {
   ALERT_COOLDOWN,
@@ -40,7 +41,6 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
     currentModeRef.current = currentMode;
   }, [currentMode]);
 
-  // --- Integrate Hooks ---
   const { initAudio, playSound, synthRef } = useAudio(isMuted);
 
   const triggerAlert = useCallback(
@@ -99,14 +99,8 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
     triggerAlert,
     initAudio
   );
-  const { isSosActive, countdown, triggerSOS, cancelSOS } = useSOS(
-    triggerAlert,
-    isMuted,
-    initAudio,
-    synthRef
-  );
+  // Removed SOS hook
 
-  // --- State/Mode Management ---
   const setMode = (newMode: MonitoringMode) => {
     setPatientMotionFrameCount(0);
     lastFrameDataRef.current = null;
@@ -120,8 +114,6 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
     setCurrentMode(newMode);
   };
 
-  // --- Drawing Utility ---
-  // This function was missing in your original code, so I've added a basic implementation
   const drawMotion = (ctx: CanvasRenderingContext2D, centroids: Point[]) => {
     ctx.fillStyle = "rgba(255, 0, 0, 0.5)"; // Red circles for motion
     centroids.forEach((p) => {
@@ -131,7 +123,6 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
     });
   };
 
-  // --- Main Animation Loop ---
   const animationLoop = useCallback(() => {
     animationFrameIdRef.current = requestAnimationFrame(animationLoop);
 
@@ -242,7 +233,6 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
     };
   }, [isCameraActive, animationLoop]);
 
-  // --- Event Handlers ---
   const handleStartStopCamera = async () => {
     if (isCameraActive) {
       stopCamera();
@@ -293,9 +283,60 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
     ]);
   };
 
-  // --- UI Rendering ---
+  const handleExportPDF = () => {
+    if (logEntries.length === 0) {
+      alert("No events to export.");
+      return;
+    }
 
-  // Supabase client for publishing perimeter and listening for dependent actions
+    // Create PDF using jsPDF
+    const pdf = new jsPDF();
+    const timestamp = new Date().toLocaleString();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const margin = 10;
+    let yPosition = margin;
+
+    // Title
+    pdf.setFontSize(16);
+    pdf.text("Event Log Report", margin, yPosition);
+    yPosition += 10;
+
+    // Generated timestamp
+    pdf.setFontSize(10);
+    pdf.text(`Generated: ${timestamp}`, margin, yPosition);
+    yPosition += 8;
+
+    // Separator
+    pdf.setDrawColor(0);
+    pdf.line(margin, yPosition, pageWidth - margin, yPosition);
+    yPosition += 6;
+
+    // Events header
+    pdf.setFontSize(12);
+    pdf.text("Events:", margin, yPosition);
+    yPosition += 8;
+
+    // Events list
+    pdf.setFontSize(9);
+    logEntries.forEach((entry) => {
+      const text = `[${entry.time}] ${entry.type.toUpperCase()}: ${entry.message}`;
+      const lines = pdf.splitTextToSize(text, pageWidth - 2 * margin);
+      
+      // Check if we need a new page
+      if (yPosition + lines.length * 5 > pageHeight - margin) {
+        pdf.addPage();
+        yPosition = margin;
+      }
+
+      pdf.text(lines, margin, yPosition);
+      yPosition += lines.length * 5 + 2;
+    });
+
+    // Save PDF
+    pdf.save(`event-log-${Date.now()}.pdf`);
+  };
+
   const supabase = createClient();
 
   // When entering perimeter monitoring, publish perimeter points to pairing row
@@ -329,7 +370,7 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentMode, pairingRoomId]);
 
-  // Subscribe to dependent actions (sos/bathroom) from pairing row
+
   useEffect(() => {
     if (!pairingRoomId) return;
     const channel = supabase
@@ -422,7 +463,6 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
     <>
       {/* Main container */}
       <div className="w-full mx-auto max-w-6xl bg-[#F0F0F0] rounded-xl shadow-2xl border-2 border-solid border-black p-6 my-4 space-y-4">
-        {/* Header */}
         <h1 className="text-center font-xl font-semibold">{getStatusText()}</h1>
 
         {/* Video and Log Grid Container*/}
@@ -521,33 +561,16 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
           >
             {isMuted ? "Unmute" : "Mute"}
           </button>
-          {/* SOS Button Area */}
-          <div className="sm:col-span-2 mt-4 sm:mt-0 flex flex-col sm:flex-row gap-2">
-            <button
-              onClick={triggerSOS}
-              disabled={!isCameraActive || isSosActive || countdown > 0}
-              className={`flex-grow bg-red-800 hover:bg-red-900 text-white font-extrabold text-xl py-3 px-6 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed ${
-                isSosActive ? "animate-pulse" : ""
-              }`}
-            >
-              {isSosActive
-                ? "SOS ACTIVE!"
-                : countdown > 0
-                ? `SOS IN ${countdown}s...`
-                : "SOS ALERT"}
-            </button>
-            {countdown > 0 && (
-              <button
-                onClick={cancelSOS}
-                className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg transition-all w-full sm:w-auto"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
+          {/* Export PDF Button */}
+          <button
+            onClick={handleExportPDF}
+            disabled={logEntries.length === 0}
+            className="sm:col-span-2 mt-4 sm:mt-0 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed"
+          >
+            Export Event Log
+          </button>
         </div>
       </div>
-      {/* Inline styles for alert flash */}
       <style>{`
         .alert-active {
             box-shadow: 0 0 20px 8px rgba(239, 68, 68, 0.7) !important;

@@ -9,9 +9,10 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 
 type Props = {
   onRoomCreated?: (id: string) => void;
+  onPairingComplete?: () => void;
 };
 
-export default function GuardianPairing({ onRoomCreated }: Props) {
+export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Props) {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [isWaiting, setIsWaiting] = useState(false);
   const [isPaired, setIsPaired] = useState(false);
@@ -328,6 +329,7 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
       console.log("Guardian connected to patient");
       setIsWaiting(false);
       setIsPaired(true);
+      if (onPairingComplete) onPairingComplete();
     });
 
 
@@ -442,30 +444,6 @@ export default function GuardianPairing({ onRoomCreated }: Props) {
               </p>
             </div>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="flex flex-col">
-              <p className="text-sm font-semibold text-gray-700 mb-2">Your Camera</p>
-              <video 
-                ref={localVideoRef} 
-                autoPlay 
-                playsInline 
-                muted 
-                className="w-full aspect-video bg-black rounded-lg object-cover" 
-              />
-            </div>
-            <div className="flex flex-col">
-              <p className="text-sm font-semibold text-gray-700 mb-2">Dependent View</p>
-              <video 
-                ref={remoteVideoRef} 
-                autoPlay 
-                playsInline 
-                muted 
-                className="w-full aspect-video bg-black rounded-lg object-cover" 
-              />
-            </div>
-          </div>
-
           {/* Action Buttons */}
           <div className="flex gap-3 pt-2">
             <button

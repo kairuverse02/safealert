@@ -61,16 +61,19 @@ export default function CameraMenu() {
   };
 
   return (
-    <div className='h-[440px] bg-neutral-400 text-white flex flex-col items-center justify-center rounded-xl'>
-      <div className='h-90 w-full relative'>
-      <video 
-        ref={videoRef} 
-        autoPlay 
-        muted 
-        className="w-full h-full bg-black object-cover absolute border-2 border-solid border-black rounded-xl" 
-      />
+    <div className='h-[440px] text-white flex flex-col items-center justify-center '>
+      <div className='h-92 w-full relative rounded'>
+        <video 
+          ref={videoRef} 
+          autoPlay 
+          muted 
+          className="rounded-md w-full h-full bg-black object-cover absolute border-solid border-black" 
+        />   
+        <h1 className="absolute left-2 text-white text-shadow-lg">
+          Your Camera
+        </h1>
       </div>
-      <div className='w-full flex justify-center gap-2 mt-4 mx-auto'>
+      <div className='w-full flex justify-center gap-2 mt-4 mx-auto rounded-full'>
         <button onClick={handleToggleCam} className={`
     px-4 py-2 rounded-full flex items-center gap-2 mb-4
     ${camOn ? 'bg-neutral-800 hover:bg-green-700' : 'bg-[#E7473C] hover:bg-red-700'}

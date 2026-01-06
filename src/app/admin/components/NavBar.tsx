@@ -155,7 +155,7 @@ export default function Navbar({
                       <Settings size={18} className="mr-3 text-gray-500" />
                       <span>Account Settings</span>
                     </Link>
-                    <Link href="/admin/settings"
+                    <Link href="/admin/privacy"
                       className="w-full flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                     >
                       <FileText size={18} className="mr-3 text-gray-500" />
