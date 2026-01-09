@@ -35,7 +35,8 @@ export function useSoundDetection(
             console.warn('Provided MediaStream has no audio tracks — cannot analyze for sound on guardian side.');
             try { onError('Remote stream has no audio track. Ensure the dependent started monitoring and allowed microphone access.', 'error'); } catch (e) {}
           } else {
-            const rawCtx = (Tone && (Tone as any).context && (Tone as any).context.rawContext) || (window.AudioContext && new (window.AudioContext)());
+            const toneCtx = Tone as unknown as { context?: { rawContext?: AudioContext | null } };
+            const rawCtx = (toneCtx && toneCtx.context && toneCtx.context.rawContext) || (typeof window !== 'undefined' && (window.AudioContext ? new (window.AudioContext)() : null));
             audioCtxRef.current = rawCtx as AudioContext;
             analyserRef.current = audioCtxRef.current.createAnalyser();
             analyserRef.current.fftSize = 2048;
@@ -74,7 +75,7 @@ export function useSoundDetection(
         let dbLevel = Number.NEGATIVE_INFINITY;
 
         if (analyserRef.current && dataBufRef.current) {
-          analyserRef.current.getFloatTimeDomainData(dataBufRef.current);
+          analyserRef.current.getFloatTimeDomainData(dataBufRef.current as unknown as Float32Array<ArrayBuffer>);
           const buf = dataBufRef.current;
           let sum = 0;
           for (let i = 0; i < buf.length; i++) {
@@ -129,10 +130,10 @@ export function useSoundDetection(
           }
         }
       }, 200);
-    } catch (e: any) {
-      console.error("Error starting sound detection:", e);
+    } catch (err: unknown) {
+      console.error("Error starting sound detection:", err);
       // Provide clearer guidance when permission is denied
-      if (e && e.name === 'NotAllowedError') {
+      if ((err as { name?: string }) && (err as { name?: string }).name === 'NotAllowedError') {
         onError("Microphone permission denied. Please allow microphone access on the dependent device (patient) for sound detection.", "error");
       } else {
         onError("Could not access microphone or stream.", "error");

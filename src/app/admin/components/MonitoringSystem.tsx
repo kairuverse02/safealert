@@ -82,9 +82,13 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
       // Play a sound for all actionable alerts except plain 'info' (which is quiet)
       if (type !== "info") {
         try {
-          playSound(type as any);
-        } catch (e) {
-          console.warn('MonitoringSystem: playSound failed', e);
+          type SoundKey = 'sound' | 'patient_motion' | 'error' | 'perimeter' | 'bathroom' | 'water' | 'sos';
+          const soundTypes = ['sound','patient_motion','error','perimeter','bathroom','water','sos'] as const;
+          if ((soundTypes as readonly string[]).includes(type)) {
+            playSound(type as SoundKey);
+          }
+        } catch (err) {
+          console.warn('MonitoringSystem: playSound failed', err);
         }
       }
 
@@ -188,7 +192,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     const video = videoRef.current;
     const canvas = canvasRef.current;
     // If we'll be calling getImageData frequently, set willReadFrequently to true for better performance
-    const ctx = canvas.getContext("2d", { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
+    const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
     if (!ctx) return;
 
     if (video.videoWidth <= 0 || video.videoHeight <= 0) {
@@ -224,8 +228,8 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
         motionCentroids = perimRes.centroids;
       } else if (mode === "patient_monitoring") {
         // Use calibrated thresholds, but be more sensitive while in patient_monitoring to detect subtle gestures
-        const baseThreshold = (patientThresholdRef as any).current;
-        const baseMin = (patientMinPixelsRef as any).current;
+        const baseThreshold = patientThresholdRef.current;
+        const baseMin = patientMinPixelsRef.current;
         const sensitivityFactor = (mode === 'patient_monitoring') ? 0.5 : 1.0; // halve thresholds to be more sensitive in patient mode
         const effThreshold = Math.max(1, Math.floor(baseThreshold * sensitivityFactor));
         const effMinPixels = Math.max(1, Math.floor(baseMin * sensitivityFactor));
@@ -385,11 +389,11 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
         videoRef.current.srcObject = remoteStream;
         videoRef.current.muted = true;
         // Play may be interrupted if another load occurs; catch and ignore AbortError
-        videoRef.current.play().catch((e: any) => {
-          if (e && e.name === 'AbortError') {
-            console.warn('MonitoringSystem: remote video play aborted (ignored)', e.message || e);
+        videoRef.current.play().catch((err: unknown) => {
+          if ((err as { name?: string }) && (err as { name?: string }).name === 'AbortError') {
+            console.warn('MonitoringSystem: remote video play aborted (ignored)', (err as { message?: string }).message || err);
           } else {
-            console.warn('MonitoringSystem: remote video play failed', e);
+            console.warn('MonitoringSystem: remote video play failed', err);
           }
         });
       } catch (e) {
@@ -486,7 +490,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = video.videoWidth || 320;
       tempCanvas.height = video.videoHeight || 240;
-      const tctx = tempCanvas.getContext('2d', { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
+      const tctx = tempCanvas.getContext('2d') as CanvasRenderingContext2D | null;
       if (!tctx) throw new Error('Failed to get canvas context');
 
       let lastData: Uint8ClampedArray | null = null;
@@ -536,8 +540,8 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
       calibrationRef.current = false;
       try {
         // cleanup temp video if we created one
-        if ((video as any)?._isTemp) {
-          try { (video as any).srcObject = null; } catch {};
+        if (((video as unknown) as { _isTemp?: boolean })?._isTemp) {
+          try { ((video as unknown) as { srcObject?: MediaStream | null }).srcObject = null; } catch {};
         }
       } catch (e) {}
     }
@@ -682,7 +686,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
 
               // mark as seen to avoid double processing via poll
               try {
-                (lastSeenDepRef as any).current = action;
+                lastSeenDepRef.current = String(action);
               } catch {}
 
               // clear the dependent_action flag so it doesn't retrigger
@@ -710,7 +714,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "pairing_rooms", filter: `id=eq.${pairingRoomId}` },
-        (payload: any) => {
+        (payload: unknown) => {
           try {
             console.log('MonitoringSystem: raw room update payload', JSON.stringify(payload));
           } catch (e) {
@@ -718,7 +722,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           }
         }
       )
-      .subscribe((status: any) => {
+      .subscribe((status: unknown) => {
         console.log('MonitoringSystem: channel subscribe status', status);
       });
 

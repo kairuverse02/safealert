@@ -46,7 +46,8 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
         return NextResponse.json({ error: msg }, { status: 500 })
       }
 
-      const existing = Array.isArray(curRows) && curRows.length > 0 ? (curRows[0] as any).answer_signal : null
+      type ExistingAnswer = { candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; sdp?: string; type?: string; transceiverRequest?: unknown; [key: string]: unknown } | null;
+      const existing = Array.isArray(curRows) && curRows.length > 0 ? (curRows[0] as { answer_signal?: unknown }).answer_signal as ExistingAnswer : null
 
       // Normalize incoming candidates to an array
       const incomingCandidates = Array.isArray(incomingAnswer.candidates)
@@ -62,7 +63,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
         ? [existing.candidate]
         : []
 
-      const merged: any = {
+      const merged: { [k: string]: unknown } = {
         // start with existing fields so we preserve sdp and other metadata
         ...(existing || {}),
         // ensure candidates array contains previous + incoming
@@ -79,7 +80,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
       merged.type = merged.sdp ? 'answer' : 'candidates'
 
       // Merge other non-answer_signal fields from body (e.g., dependent_action) while ensuring answer_signal is the merged object
-      const updateBody: any = { ...body, answer_signal: merged }
+      const updateBody: Record<string, unknown> = { ...body, answer_signal: merged }
 
       // Do the update with the merged object
       const { data: updData, error: updErr } = await supabase

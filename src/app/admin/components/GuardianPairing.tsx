@@ -56,24 +56,25 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       // If peer already exists, attach tracks
       if (peerRef.current) {
         try {
-          if (typeof (peerRef.current as any).addStream === 'function') {
-            (peerRef.current as any).addStream(s);
+          const maybePeer = peerRef.current as unknown as { addStream?: (s: MediaStream) => void; _pc?: RTCPeerConnection };
+          if (typeof maybePeer.addStream === 'function') {
+            maybePeer.addStream(s);
             console.log('Guardian: added local stream via addStream');
           } else {
-            const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+            const pc = maybePeer._pc;
             if (pc) {
               s.getTracks().forEach((t) => pc.addTrack(t, s));
               console.log('Guardian: added local tracks to underlying RTCPeerConnection');
-              try { console.log('Guardian PC transceivers after addTrack:', pc.getTransceivers ? pc.getTransceivers() : []); } catch (e) {}
+              try { console.log('Guardian PC transceivers after addTrack:', pc.getTransceivers ? pc.getTransceivers() : []); } catch (err) { console.warn(err); }
             }
           }
-        } catch (e) {
-          console.warn('Guardian: failed to attach local stream to peer', e);
+        } catch (err) {
+          console.warn('Guardian: failed to attach local stream to peer', err);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('Guardian: failed to enable local camera', err);
-      setLocalCameraError(String(err?.message || err));
+      setLocalCameraError(String((err as Error)?.message || String(err)));
       setLocalCameraActive(false);
     }
   };
@@ -169,7 +170,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
 
     // Do NOT get guardian camera automatically at room creation to avoid prompting permissions.
     // The guardian can enable their local camera manually after the room is created.
-    let localStream: MediaStream | undefined = undefined;
+    const localStream: MediaStream | undefined = undefined;
     streamRef.current = null;
     // clear any previous camera error
     setErrorMsg(null);
@@ -296,9 +297,9 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                     // Also apply any candidates included in the update (do not reapply full answer if SDP is same)
                     const candidates = ans.candidates || ans.candidate ? (ans.candidates || [ans.candidate]) : [];
                     if (Array.isArray(candidates) && candidates.length > 0) {
-                      candidates.forEach((c: any) => {
+                      (candidates as RTCIceCandidateInit[]).forEach((c) => {
                         try {
-                          peerRef.current?.signal({ type: 'candidate', candidate: c });
+                          peerRef.current?.signal({ type: 'candidate', candidate: c as unknown as RTCIceCandidate });
                         } catch (e) {
                           console.warn('Failed to signal candidate from poll', e);
                         }
@@ -363,12 +364,11 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
         if (pc) {
           pc.oniceconnectionstatechange = () => console.log('Guardian PC ICE state:', pc.iceConnectionState);
           pc.onconnectionstatechange = () => {
-            const connState = (pc as any).connectionState || pc.iceConnectionState;
-            console.log('Guardian PC connection state:', connState);
+            const connState = (pc as RTCPeerConnection).connectionState || pc.iceConnectionState;
           };
 
           try {
-            pc.onicecandidate = (evt: any) => console.log('Guardian PC onicecandidate', evt && evt.candidate);
+            pc.onicecandidate = (evt: RTCPeerConnectionIceEvent) => console.log('Guardian PC onicecandidate', evt && evt.candidate);
           } catch (e) {}
 
           try {
@@ -393,7 +393,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
 
           // Fallback: listen for individual track events and build a MediaStream if simple-peer 'stream' doesn't fire
           try {
-            pc.ontrack = (ev: any) => {
+            pc.ontrack = (ev: RTCTrackEvent) => {
               try {
                 console.log('Guardian PC ontrack event (raw):', ev);
                 console.log('[MIC_TEST] ontrack: track info:', { kind: ev.track?.kind, id: ev.track?.id, label: ev.track?.label });
@@ -449,7 +449,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           table: "pairing_rooms",
           filter: `id=eq.${id}`,
         },
-        (payload: { new: { answer_signal?: any; guardian_event?: any } }) => {
+        (payload: { new: { answer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; guardian_event?: { type?: string; [key: string]: unknown } | null } }) => {
           // Detect guardian_event messages published by the dependent (e.g., mic test start, mic unavailable, permission denied)
           try {
             const ge = payload.new.guardian_event;
@@ -486,7 +486,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                   // If the answer requests a transceiver for video, add a recvonly transceiver before signaling (if possible)
                   try {
                     const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                    const req = (answer && (answer.transceiverRequest || (Array.isArray(answer.transceiverRequests) ? answer.transceiverRequests[0] : null)));
+                    const req = (answer && (answer.transceiverRequest || (Array.isArray(answer.transceiverRequests) ? answer.transceiverRequests[0] : null))) as { kind?: string } | null;
                     if (pc && req && (req.kind === 'video' || req.kind === 'audio')) {
                       console.log('Guardian: realtime answer requests transceiver for', req.kind, ', adding recvonly transceiver');
                       if (typeof pc.addTransceiver === 'function') {
@@ -515,9 +515,10 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
               const candidates = answer.candidates || answer.candidate ? (answer.candidates || [answer.candidate]) : [];
               if (Array.isArray(candidates) && candidates.length > 0) {
                 setTimeout(() => {
-                  candidates.forEach((c: any) => {
+                  const candidatesArr = (candidates as unknown) as RTCIceCandidateInit[];
+                  candidatesArr.forEach((c) => {
                     try {
-                      peerRef.current?.signal({ type: 'candidate', candidate: c });
+                      peerRef.current?.signal({ type: 'candidate', candidate: c as unknown as RTCIceCandidate });
                     } catch (e) {
                       console.warn('Failed to signal candidate', e);
                     }
@@ -529,7 +530,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
 
               // If a transceiverRequest accompanies candidates, attempt to add a recvonly transceiver early
               try {
-                const req = (answer && (answer.transceiverRequest || (Array.isArray(answer.transceiverRequests) ? answer.transceiverRequests[0] : null)));
+                const req = (answer && (answer.transceiverRequest || (Array.isArray(answer.transceiverRequests) ? answer.transceiverRequests[0] : null))) as { kind?: string } | null as { kind?: string } | null;
                 const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
                 if (pc && req && (req.kind === 'video' || req.kind === 'audio') && !hasAddedRecvTransceiverRef.current) {
                   try {
@@ -544,7 +545,15 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                 }
               } catch (e) {}
 
-              answer.candidates.forEach((c: any) => peerRef.current?.signal({ type: 'candidate', candidate: c }));
+              (answer.candidates as RTCIceCandidateInit[]).forEach((c) => {
+                try {
+                  // Construct an RTCIceCandidate from the init object to satisfy the peer.signal typing
+                  const cand = new RTCIceCandidate(c);
+                  peerRef.current?.signal({ type: 'candidate', candidate: cand as unknown as RTCIceCandidate });
+                } catch (e) {
+                  console.warn('Failed to signal candidate', e);
+                }
+              });
             } else {
               // fallback: single candidate or other signals
               console.log('Received signal via realtime, passing through', answer.type || 'signal');

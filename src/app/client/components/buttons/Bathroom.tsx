@@ -87,7 +87,7 @@ const Bathroom = () => {
 
     // If a global helper is available (exposed by PatientScanner when peer exists), call it directly
     try {
-      const globalFn = (window as any).__patientMicTest;
+      const globalFn = window.__patientMicTest;
       if (globalFn && typeof globalFn === 'function') {
         console.log('[BATHROOM] invoking global patient mic test');
         const ok = await globalFn();
@@ -96,8 +96,8 @@ const Bathroom = () => {
         setTimeout(() => setShowToast(false), 3000);
         return;
       }
-    } catch (e) {
-      console.warn('[BATHROOM] global mic test invocation failed', e);
+    } catch (err) {
+      console.warn('[BATHROOM] global mic test invocation failed', err);
     }
 
     // Fallback: dispatch event (older flow)

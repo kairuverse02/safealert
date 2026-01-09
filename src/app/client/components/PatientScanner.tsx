@@ -5,6 +5,14 @@ import { createClient } from '@/lib/supabase/client';
 import { Point } from '@/types';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import Peer from 'simple-peer';
+
+declare global {
+  interface Window {
+    __patientMicTest?: () => Promise<boolean>;
+    __patientPeer?: Peer.Instance | null;
+  }
+}
+
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { useSoundDetection } from '@/hooks/useSoundDetection';
 import { useAudio } from '@/hooks/useAudio';
@@ -100,7 +108,7 @@ const pairDevice = useCallback(async (roomId: string) => {
 
         // Expose a global helper so other UI (e.g., Dashboard/Bathroom) can trigger a mic test
         try {
-          (window as any).__patientMicTest = async () => {
+          window.__patientMicTest = async () => {
             console.log('[GLOBAL] __patientMicTest called');
             try {
               const peerExists = !!peerRef.current;
@@ -135,7 +143,7 @@ const pairDevice = useCallback(async (roomId: string) => {
             }
           };
           // Expose the peer for debug inspection
-          (window as any).__patientPeer = peerRef.current;
+          window.__patientPeer = peerRef.current;
         } catch (e) {
           console.warn('[GLOBAL] Failed to attach global mic test helper', e);
         }
@@ -510,7 +518,7 @@ const pairDevice = useCallback(async (roomId: string) => {
             if (pc) {
               pc.oniceconnectionstatechange = () => console.log('Patient PC ICE state:', pc.iceConnectionState);
               pc.onconnectionstatechange = () => {
-                const connState = (pc as any).connectionState || pc.iceConnectionState;
+                const connState = pc.connectionState || pc.iceConnectionState;
                 console.log('Patient PC connection state:', connState);
                 // If the underlying RTCPeerConnection reports connected, treat it as paired
                 if (connState === 'connected') {
@@ -614,11 +622,14 @@ const pairDevice = useCallback(async (roomId: string) => {
           if (streamRef.current && peerRef.current) {
             try {
               const s = streamRef.current;
-              if (typeof (peerRef.current as any).addStream === 'function') {
-                (peerRef.current as any).addStream(s);
+              const maybePeer = peerRef.current as unknown as { addStream?: (s: MediaStream) => void; _pc?: RTCPeerConnection };
+              if (typeof maybePeer.addStream === 'function') {
+                maybePeer.addStream(s);
               } else {
-                const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                if (pc) s.getTracks().forEach(t => pc.addTrack(t, s));                try { if (pc) console.log('[CONNECT] pc.getSenders after adding pending stream', pc.getSenders().map(sd => ({ trackId: sd.track?.id, kind: sd.track?.kind }))); } catch(e) { console.warn('[CONNECT] failed to log pc.getSenders', e); }              }
+                const pc = maybePeer._pc;
+                if (pc) s.getTracks().forEach(t => pc.addTrack(t, s));
+                try { if (pc) console.log('[CONNECT] pc.getSenders after adding pending stream', pc.getSenders().map(sd => ({ trackId: sd.track?.id, kind: sd.track?.kind }))); } catch(err) { console.warn('[CONNECT] failed to log pc.getSenders', err); }
+              }
             } catch (err) {
               console.error('Failed to add pending stream on connect', err);
             }
@@ -637,7 +648,7 @@ const pairDevice = useCallback(async (roomId: string) => {
           } catch (e) {
             console.warn('Failed to clear pairingRoomId on peer close', e);
           }
-          try { delete (window as any).__patientMicTest; delete (window as any).__patientPeer; } catch (e) {}
+          try { delete window.__patientMicTest; delete window.__patientPeer; } catch (err) { console.warn(err); }
         });
 
       })
@@ -740,7 +751,7 @@ const pairDevice = useCallback(async (roomId: string) => {
     }
   };
 
-  const isPeerConnected = () => !!(peerRef.current && (peerRef.current as any).connected);
+  const isPeerConnected = () => !!(peerRef.current && ((peerRef.current as unknown as { connected?: boolean }).connected));
 
   const testMicNow = async () => {
     console.log('[MIC_TEST] manual mic test starting');
@@ -795,7 +806,7 @@ const pairDevice = useCallback(async (roomId: string) => {
         console.warn('[MIC_TEST] failed to publish mic_test_start', e);
       }
 
-      const pc = (peerRef.current as any)?._pc as RTCPeerConnection | undefined;
+      const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
       if (pc) {
         s.getTracks().forEach(t => {
           try {
@@ -819,8 +830,9 @@ const pairDevice = useCallback(async (roomId: string) => {
       }, 5000);
     } catch (err) {
       console.error('[MIC_TEST] failed to get mic', err);
-      const e: any = err;
-      const failed = `Failed: ${String(e?.message || e)}`;
+      const e = err as unknown;
+      const message = (typeof e === 'object' && e !== null && 'message' in e) ? (e as { message?: unknown }).message : undefined;
+      const failed = `Failed: ${typeof message === 'string' ? message : String(e)}`;
       setMicTestStatus(failed);
       try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: failed } })); } catch {}
     }
