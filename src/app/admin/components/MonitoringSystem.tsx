@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import jsPDF from "jspdf";
+import { jsPDF } from "jspdf";
 import { LogEntry, LogEntryType, MonitoringMode, Point } from "@/types";
 import {
   ALERT_COOLDOWN,
@@ -10,6 +10,9 @@ import {
   PERIMETER_MOTION_THRESHOLD,
   PATIENT_MIN_MOTION_PIXELS,
   PATIENT_MOTION_THRESHOLD,
+  MOTION_PERCENT_FALLBACK,
+  MOTION_ENERGY_WINDOW,
+  MOTION_ENERGY_MULTIPLIER,
   SOS_FLASH_INTERVAL,
 } from "@/lib/constants";
 import { detectMotion } from "@/lib/motion";
@@ -22,9 +25,12 @@ import { useSoundDetection } from "@/hooks/useSoundDetection";
 
 type Props = {
   pairingRoomId?: string | null;
+  remoteStream?: MediaStream | null;
+  isMonitoring?: boolean;
+  onToggleMonitoring?: (start: boolean) => void;
 };
 
-export default function MonitoringSystem({ pairingRoomId }: Props) {
+export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonitoring = false, onToggleMonitoring }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastFrameDataRef = useRef<Uint8ClampedArray | null>(null);
@@ -36,6 +42,17 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
   const [isMuted, setIsMuted] = useState(false);
   const [patientMotionFrameCount, setPatientMotionFrameCount] = useState(0);
 
+  // Dynamic patient motion sensitivity (can be calibrated at runtime)
+  const [patientThreshold, setPatientThreshold] = useState(PATIENT_MOTION_THRESHOLD);
+  const [patientMinPixels, setPatientMinPixels] = useState(PATIENT_MIN_MOTION_PIXELS);
+  const patientThresholdRef = useRef(patientThreshold);
+  const patientMinPixelsRef = useRef(patientMinPixels);
+  const calibrationRef = useRef(false); // calibration in-progress
+  const calibratedRef = useRef(false); // whether calibration was performed for current patient session
+  const motionHistoryRef = useRef<number[]>([]);
+  useEffect(() => { patientThresholdRef.current = patientThreshold; }, [patientThreshold]);
+  useEffect(() => { patientMinPixelsRef.current = patientMinPixels; }, [patientMinPixels]);
+
   const currentModeRef = useRef(currentMode);
   useEffect(() => {
     currentModeRef.current = currentMode;
@@ -44,7 +61,7 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
   const { initAudio, playSound, synthRef } = useAudio(isMuted);
 
   const triggerAlert = useCallback(
-    (message: string, type: LogEntryType = "perimeter") => {
+    async (message: string, type: LogEntryType = "perimeter") => {
       const now = Date.now();
       const prevTime = lastAlertTimeRef.current;
       
@@ -55,8 +72,20 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
         return;
       }
 
-      if (type !== "sos" && type !== "info") {
-        playSound(type as 'sound' | 'patient_motion' | 'error' | 'perimeter' | 'bathroom');
+      // Try to initialize audio (best-effort). Some browsers require a user gesture; await so playSound runs after init.
+      try {
+        await initAudio();
+      } catch (e) {
+        console.warn('MonitoringSystem: initAudio failed or was blocked', e);
+      }
+
+      // Play a sound for all actionable alerts except plain 'info' (which is quiet)
+      if (type !== "info") {
+        try {
+          playSound(type as any);
+        } catch (e) {
+          console.warn('MonitoringSystem: playSound failed', e);
+        }
       }
 
       setLogEntries((prev) => [
@@ -78,8 +107,26 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
       }
       
       lastAlertTimeRef.current = now;
+
+      // Publish a guardian-side event to the pairing row so the dependent can display it
+      if (pairingRoomId) {
+        (async () => {
+          try {
+            const payload = { guardian_event: { type, message, time: new Date().toISOString() } };
+            const resp = await fetch(`/api/signaling/${pairingRoomId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const json = await resp.json().catch(() => null);
+            console.log('Published guardian_event', resp.status, json);
+          } catch (err) {
+            console.warn('Failed to publish guardian_event', err);
+          }
+        })();
+      }
     },
-    [playSound]
+    [playSound, pairingRoomId]
   );
 
   const { startCamera, stopCamera, streamRef, isCameraActive } = useCamera(
@@ -94,10 +141,11 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
     checkCrossing: checkPerimeterCrossing,
   } = usePerimeter(canvasRef, currentMode);
   useSoundDetection(
-    currentMode === "patient_monitoring",
+    currentMode === "patient_monitoring" && !!remoteStream,
     triggerAlert,
     triggerAlert,
-    initAudio
+    initAudio,
+    remoteStream || streamRef.current
   );
   // Removed SOS hook
 
@@ -126,8 +174,10 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
   const animationLoop = useCallback(() => {
     animationFrameIdRef.current = requestAnimationFrame(animationLoop);
 
+    const sourceStream = remoteStream || streamRef.current;
+
     if (
-      !streamRef.current ||
+      !sourceStream ||
       !videoRef.current ||
       !canvasRef.current ||
       videoRef.current.readyState < videoRef.current.HAVE_METADATA
@@ -137,7 +187,8 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
+    // If we'll be calling getImageData frequently, set willReadFrequently to true for better performance
+    const ctx = canvas.getContext("2d", { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
     if (!ctx) return;
 
     if (video.videoWidth <= 0 || video.videoHeight <= 0) {
@@ -163,26 +214,87 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
 
     if (lastFrameDataRef.current) {
       if (mode === "perimeter_monitoring") {
-        motionCentroids = detectMotion(
+        const perimRes = detectMotion(
           currentFrameData,
           lastFrameDataRef.current,
           canvas.width,
           PERIMETER_MOTION_THRESHOLD,
           PERIMETER_MIN_MOTION_PIXELS
         );
+        motionCentroids = perimRes.centroids;
       } else if (mode === "patient_monitoring") {
-        motionCentroids = detectMotion(
+        // Use calibrated thresholds, but be more sensitive while in patient_monitoring to detect subtle gestures
+        const baseThreshold = (patientThresholdRef as any).current;
+        const baseMin = (patientMinPixelsRef as any).current;
+        const sensitivityFactor = (mode === 'patient_monitoring') ? 0.5 : 1.0; // halve thresholds to be more sensitive in patient mode
+        const effThreshold = Math.max(1, Math.floor(baseThreshold * sensitivityFactor));
+        const effMinPixels = Math.max(1, Math.floor(baseMin * sensitivityFactor));
+        const energyMultiplier = MOTION_ENERGY_MULTIPLIER;
+
+        const motionRes = detectMotion(
           currentFrameData,
           lastFrameDataRef.current,
           canvas.width,
-          PATIENT_MOTION_THRESHOLD,
-          PATIENT_MIN_MOTION_PIXELS
+          effThreshold,
+          effMinPixels
         );
+        motionCentroids = motionRes.centroids;
+        const changed = motionRes.changedPixels;
+        const framePixels = canvas.width * canvas.height;
+        const percent = framePixels ? changed / framePixels : 0;
+
+        // Compute simple brightness average (sampled) for per-frame diagnostics
+        let brightnessSum = 0;
+        let brightnessCount = 0;
+        const sampleStep = 8; // sample every 8 pixels to keep compute light
+        for (let i = 0; i < currentFrameData.length; i += 4 * sampleStep) {
+          const g = (currentFrameData[i] + currentFrameData[i + 1] + currentFrameData[i + 2]) / 3;
+          brightnessSum += g;
+          brightnessCount++;
+        }
+        const brightnessAvg = brightnessCount ? brightnessSum / brightnessCount : 0;
+        const brightnessDelta = lastBrightnessRef.current != null ? Math.abs(brightnessAvg - lastBrightnessRef.current) : 0;
+        lastBrightnessRef.current = brightnessAvg;
+
+        // Mean centroid and delta for rough motion magnitude (helps when changed pixels are sparse)
+        let meanX = 0;
+        let meanY = 0;
         if (motionCentroids.length > 0) {
+          for (const p of motionCentroids) {
+            meanX += p.x;
+            meanY += p.y;
+          }
+          meanX /= motionCentroids.length;
+          meanY /= motionCentroids.length;
+        }
+        const prevMean = prevMeanRef.current;
+        const centroidDelta = prevMean && motionCentroids.length ? Math.hypot(meanX - prevMean.x, meanY - prevMean.y) : 0;
+        if (motionCentroids.length > 0) prevMeanRef.current = { x: meanX, y: meanY };
+
+        // Maintain a short history of changed-pixel counts for smoothing/energy
+        const h = motionHistoryRef.current;
+        h.push(changed);
+        if (h.length > MOTION_ENERGY_WINDOW) h.splice(0, h.length - MOTION_ENERGY_WINDOW);
+        const movingSum = h.reduce((a, b) => a + b, 0);
+        const avgPercent = framePixels && h.length ? movingSum / (framePixels * h.length) : 0;
+
+
+
+        // Consider motion detected either by pixel count OR percent-based fallback OR energy over recent frames OR centroidDelta / brightnessDelta
+        const percentFallback = percent >= (MOTION_PERCENT_FALLBACK);
+        const energyTriggered = movingSum >= (effMinPixels * MOTION_ENERGY_WINDOW * energyMultiplier);
+        const deltaTriggered = centroidDelta >= 8 || brightnessDelta >= 6; // empirical fallbacks
+
+        if (changed > effMinPixels || percentFallback || energyTriggered || deltaTriggered) {
           setPatientMotionFrameCount((prev) => prev + 1);
         } else {
           setPatientMotionFrameCount(0);
         }
+
+        // Update overlay stats for UI
+        try {
+          setMotionStats({ changedPixels: changed, percent, movingSum, avgPercent, centroidDelta, brightnessAvg, brightnessDelta });
+        } catch (e) {}
       }
     }
 
@@ -207,7 +319,7 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
     ctx.restore();
 
     lastFrameDataRef.current = new Uint8ClampedArray(currentFrameData);
-  }, [drawPerimeter, checkPerimeterCrossing, triggerAlert, streamRef]);
+  }, [drawPerimeter, checkPerimeterCrossing, triggerAlert, streamRef, remoteStream]);
 
   // --- Patient Motion Alert ---
   useEffect(() => {
@@ -219,9 +331,10 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
 
   // --- Animation Loop Control ---
   useEffect(() => {
-    if (isCameraActive && !animationFrameIdRef.current) {
+    const shouldRun = (isCameraActive || !!remoteStream);
+    if (shouldRun && !animationFrameIdRef.current) {
       animationFrameIdRef.current = requestAnimationFrame(animationLoop);
-    } else if (!isCameraActive && animationFrameIdRef.current) {
+    } else if (!shouldRun && animationFrameIdRef.current) {
       cancelAnimationFrame(animationFrameIdRef.current);
       animationFrameIdRef.current = null;
     }
@@ -231,7 +344,59 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
         animationFrameIdRef.current = null;
       }
     };
-  }, [isCameraActive, animationLoop]);
+  }, [isCameraActive, animationLoop, remoteStream]);
+
+  // Auto-calibrate when entering patient monitoring or when camera starts in patient mode
+  useEffect(() => {
+    try {
+      if (currentMode === 'patient_monitoring') {
+        // reset calibrated flag when switching into patient mode
+        calibratedRef.current = false;
+      }
+      if (currentMode === 'patient_monitoring' && isCameraActive && !calibratedRef.current) {
+        handleCalibrateMotion();
+      }
+    } catch (e) {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMode, isCameraActive]);
+
+  // Attach remote stream to the video element when provided and ensure playback starts
+  useEffect(() => {
+    if (videoRef.current) {
+      try {
+        // Log audio track count for diagnostics
+        try { console.log('MonitoringSystem: remoteStream audio tracks', remoteStream ? remoteStream.getAudioTracks().length : 0); } catch (e) {}
+
+        // If remoteStream is falsy, clear the srcObject and stop any playback
+        if (!remoteStream) {
+          if (videoRef.current.srcObject) {
+            videoRef.current.srcObject = null;
+            try { videoRef.current.pause(); } catch {}
+          }
+          return;
+        }
+
+        // Avoid re-setting the same stream which can trigger load/play interruptions
+        if (videoRef.current.srcObject === remoteStream) {
+          // already attached
+          return;
+        }
+
+        videoRef.current.srcObject = remoteStream;
+        videoRef.current.muted = true;
+        // Play may be interrupted if another load occurs; catch and ignore AbortError
+        videoRef.current.play().catch((e: any) => {
+          if (e && e.name === 'AbortError') {
+            console.warn('MonitoringSystem: remote video play aborted (ignored)', e.message || e);
+          } else {
+            console.warn('MonitoringSystem: remote video play failed', e);
+          }
+        });
+      } catch (e) {
+        console.warn('MonitoringSystem: failed to attach remote stream', e);
+      }
+    }
+  }, [remoteStream]);
 
   const handleStartStopCamera = async () => {
     if (isCameraActive) {
@@ -268,6 +433,126 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
         ? "perimeter_setup"
         : "patient_monitoring"
     );
+
+  // Motion calibration: samples frames to estimate ambient pixel noise and set thresholds automatically
+  const handleCalibrateMotion = async () => {
+    // Allow calibration with either local camera (isCameraActive) OR the dependent's remote stream
+    if (!isCameraActive && !remoteStream) {
+      setLogEntries((prev) => [
+        { id: Date.now() + Math.random(), type: "info", message: "Start the camera before calibrating motion.", time: new Date().toLocaleTimeString() },
+        ...prev.slice(0, 19),
+      ]);
+      return;
+    }
+
+    // Avoid overlapping calibrations
+    if (calibrationRef.current) return;
+    calibrationRef.current = true;
+
+    setLogEntries((prev) => [
+      { id: Date.now() + Math.random(), type: "info", message: "Auto-calibrating motion sensitivity... please stay still for ~3s.", time: new Date().toLocaleTimeString() },
+      ...prev.slice(0, 19),
+    ]);
+
+    // Choose the video source: prefer attached videoRef (local or remote). If not available, create a hidden video element for remoteStream
+    let video: HTMLVideoElement | null = null;
+    let createdTempVideo = false;
+    try {
+      if (videoRef.current && (isCameraActive || videoRef.current.srcObject)) {
+        video = videoRef.current;
+      } else if (remoteStream) {
+        // create an offscreen video element bound to remote stream to ensure we can sample frames
+        video = document.createElement('video');
+        video.autoplay = true;
+        video.muted = true;
+        video.playsInline = true;
+        try { video.srcObject = remoteStream; } catch (e) { console.warn('MonitoringSystem: failed to set temp video srcObject', e); }
+        createdTempVideo = true;
+        // wait for metadata or timeout to ensure videoWidth/videoHeight are available
+        await new Promise((resolve) => {
+          let settled = false;
+          const onMeta = () => { if (!settled) { settled = true; resolve(null); } };
+          video!.addEventListener('loadedmetadata', onMeta);
+          const t = setTimeout(() => { if (!settled) { settled = true; resolve(null); } }, 1500);
+        });
+      }
+
+      if (!video) {
+        throw new Error('No video source available for calibration');
+      }
+
+      const samples = 30;
+      const intervalMs = 120; // sample every ~120ms for ~3.6s
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = video.videoWidth || 320;
+      tempCanvas.height = video.videoHeight || 240;
+      const tctx = tempCanvas.getContext('2d', { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
+      if (!tctx) throw new Error('Failed to get canvas context');
+
+      let lastData: Uint8ClampedArray | null = null;
+      const medians: number[] = [];
+
+      for (let i = 0; i < samples; i++) {
+        try { tctx.drawImage(video!, 0, 0, tempCanvas.width, tempCanvas.height); } catch (e) { break; }
+        let data;
+        try { data = tctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height).data; } catch (e) { break; }
+        if (lastData) {
+          const diffs: number[] = [];
+          const step = 4; // finer sampling for sensitivity
+          for (let j = 0; j < data.length; j += 4 * step) {
+            const g1 = (lastData[j] + lastData[j+1] + lastData[j+2]) / 3;
+            const g2 = (data[j] + data[j+1] + data[j+2]) / 3;
+            diffs.push(Math.abs(g2 - g1));
+          }
+          diffs.sort((a,b)=>a-b);
+          const mid = Math.floor(diffs.length/2);
+          const median = diffs.length ? diffs[mid] : 0;
+          medians.push(median);
+        }
+        lastData = new Uint8ClampedArray(data);
+        await new Promise((r) => setTimeout(r, intervalMs));
+      }
+
+      const ambientMedian = medians.length ? medians[Math.floor(medians.length/2)] : 0;
+      // Be more sensitive: lower baseline and smaller min-pixel proportion
+      const newThreshold = Math.max(4, Math.round(ambientMedian * 1.3 + 1));
+      const newMinPixels = Math.max(4, Math.round((tempCanvas.width * tempCanvas.height) * 0.0002));
+
+      setPatientThreshold(newThreshold);
+      setPatientMinPixels(newMinPixels);
+      calibratedRef.current = true;
+
+      setLogEntries((prev) => [
+        { id: Date.now() + Math.random(), type: "info", message: `Auto-calibration complete. Threshold ${newThreshold}, minPixels ${newMinPixels}.`, time: new Date().toLocaleTimeString() },
+        ...prev.slice(0, 19),
+      ]);
+    } catch (e) {
+      console.warn('MonitoringSystem: calibration failed', e);
+      setLogEntries((prev) => [
+        { id: Date.now() + Math.random(), type: "error", message: "Auto-calibration failed.", time: new Date().toLocaleTimeString() },
+        ...prev.slice(0, 19),
+      ]);
+    } finally {
+      calibrationRef.current = false;
+      try {
+        // cleanup temp video if we created one
+        if ((video as any)?._isTemp) {
+          try { (video as any).srcObject = null; } catch {};
+        }
+      } catch (e) {}
+    }
+  }; 
+
+  const handleEnableAudio = async () => {
+    try {
+      await initAudio();
+      // Play a small test sound if not muted
+      try { playSound('sound'); } catch {}
+      console.log('MonitoringSystem: audio enabled by user gesture');
+    } catch (e) {
+      console.warn('MonitoringSystem: failed to enable audio', e);
+    }
+  };
 
   const handleBathroomRequest = () => {
     initAudio();
@@ -373,28 +658,163 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
 
   useEffect(() => {
     if (!pairingRoomId) return;
+
+    console.log('MonitoringSystem: subscribing to room', pairingRoomId);
+
     const channel = supabase
       .channel(`room-${pairingRoomId}`)
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "pairing_rooms", filter: `id=eq.${pairingRoomId}` },
         (payload: { new: { dependent_action?: string; perimeter_json?: string } }) => {
+          console.log('MonitoringSystem: received room update', payload);
           const action = payload.new.dependent_action;
-          if (action === "sos") {
-            triggerAlert("Dependent triggered SOS", "sos");
-          } else if (action === "bathroom") {
-            triggerAlert("Dependent requested bathroom", "bathroom");
+          if (action) {
+            try {
+              if (action === "sos") {
+                triggerAlert("Dependent triggered SOS", "sos");
+              } else if (action === "bathroom") {
+                triggerAlert("Dependent requested bathroom", "bathroom");
+              } else {
+                // generic dependent message
+                triggerAlert(`Dependent: ${action}`, "info");
+              }
+
+              // mark as seen to avoid double processing via poll
+              try {
+                (lastSeenDepRef as any).current = action;
+              } catch {}
+
+              // clear the dependent_action flag so it doesn't retrigger
+              (async () => {
+                try {
+                  const rid = pairingRoomId;
+                  if (rid) {
+                    const clearResp = await fetch(`/api/signaling/${rid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dependent_action: null }) });
+                    const clearJson = await clearResp.json().catch(() => null);
+                    console.log('Guardian: Cleared dependent_action response', clearResp.status, clearJson);
+                  }
+                } catch (err) {
+                  console.warn('Guardian: Failed to clear dependent_action', err);
+                }
+              })();
+            } catch (e) {
+              console.warn('Failed to process dependent_action', e);
+            }
           } else if (payload.new.perimeter_json) {
             // perimeter updates handled by client drawing already, no-op here
           }
         }
       )
-      .subscribe();
+      // Also log raw update payloads for diagnostics
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "pairing_rooms", filter: `id=eq.${pairingRoomId}` },
+        (payload: any) => {
+          try {
+            console.log('MonitoringSystem: raw room update payload', JSON.stringify(payload));
+          } catch (e) {
+            console.log('MonitoringSystem: raw room update payload (failed to stringify)', payload);
+          }
+        }
+      )
+      .subscribe((status: any) => {
+        console.log('MonitoringSystem: channel subscribe status', status);
+      });
+
+    try {
+      console.log('MonitoringSystem: subscription created for room', pairingRoomId);
+    } catch {}
+
+    // Persistent polling fallback: poll the room state every 1s and dedupe events using lastSeenDepRef
+    const lastSeenDepRef = { current: null as string | null };
+    let pollIntervalId: number | null = window.setInterval(async () => {
+      try {
+        const resp = await fetch(`/api/signaling/${pairingRoomId}`);
+        const js = await resp.json().catch(() => null);
+        if (resp.ok && js?.data) {
+          const dep = js.data.dependent_action;
+          if (dep && dep !== lastSeenDepRef.current) {
+            console.log('MonitoringSystem: polled detected dependent_action', dep);
+            lastSeenDepRef.current = dep;
+            try {
+              if (dep === 'sos') triggerAlert('Dependent triggered SOS', 'sos');
+              else if (dep === 'bathroom') triggerAlert('Dependent requested bathroom', 'bathroom');
+              else if (dep === 'water') triggerAlert('Dependent requested water', 'water');
+              else triggerAlert(`Dependent: ${dep}`, 'info');
+            } catch (e) {
+              console.warn('MonitoringSystem: failed processing polled dependent_action', e);
+            }
+
+            // clear it so it won't re-trigger
+            try {
+              const clearResp = await fetch(`/api/signaling/${pairingRoomId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dependent_action: null }) });
+              const clearJson = await clearResp.json().catch(() => null);
+              console.log('MonitoringSystem: Cleared dependent_action after poll', clearResp.status, clearJson);
+            } catch (err) {
+              console.warn('MonitoringSystem: Failed to clear dependent_action after poll', err);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('MonitoringSystem: polling failed', e);
+      }
+    }, 1000);
+
+    // Clear the poll interval on cleanup
+    // (we also clear it below in the useEffect cleanup)
+    // store pollIntervalId so cleanup can access it
+    // NOTE: keep the polling running while the component is mounted to be resilient against missed realtime events
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const __pollInterval = pollIntervalId;
+
+    // Also fetch current room state once on mount so we process any dependent_action that may have been set
+    (async () => {
+      try {
+        const resp = await fetch(`/api/signaling/${pairingRoomId}`);
+        const js = await resp.json().catch(() => null);
+        console.log('MonitoringSystem: initial room fetch', resp.status, js);
+        const dep = js?.data?.dependent_action;
+        if (dep) {
+          console.log('MonitoringSystem: processing existing dependent_action on mount', dep);
+          // Reuse same processing logic
+          if (dep === "sos") {
+            triggerAlert("Dependent triggered SOS", "sos");
+          } else if (dep === "bathroom") {
+            triggerAlert("Dependent requested bathroom", "bathroom");
+          } else if (dep === "water") {
+            triggerAlert("Dependent requested water", "water");
+          } else {
+            triggerAlert(`Dependent: ${dep}`, "info");
+          }
+
+          // Clear it so it won't retrigger
+          try {
+            const clearResp = await fetch(`/api/signaling/${pairingRoomId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dependent_action: null }) });
+            const clearJson = await clearResp.json().catch(() => null);
+            console.log('MonitoringSystem: Cleared dependent_action on mount', clearResp.status, clearJson);
+          } catch (err) {
+            console.warn('MonitoringSystem: Failed to clear dependent_action on mount', err);
+          }
+        }
+      } catch (e) {
+        console.warn('MonitoringSystem: initial room fetch failed', e);
+      }
+    })();
 
     return () => {
       try {
         channel.unsubscribe();
       } catch {}
+
+      try {
+        if (pollIntervalId) {
+          clearInterval(pollIntervalId);
+          pollIntervalId = null;
+        }
+      } catch (e) {
+        console.warn('MonitoringSystem: failed to clear poll interval on cleanup', e);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pairingRoomId]);
@@ -413,6 +833,10 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
     }
   };
 
+  const [motionStats, setMotionStats] = useState({ changedPixels: 0, percent: 0, movingSum: 0, avgPercent: 0, centroidDelta: 0, brightnessAvg: 0, brightnessDelta: 0 });
+  const lastBrightnessRef = useRef<number | null>(null);
+  const prevMeanRef = useRef<{ x: number; y: number } | null>(null);
+
   const getLogEntryUI = ({ id, time, type, message }: LogEntry) => {
     let headerClass, headerText;
     switch (type) {
@@ -427,6 +851,10 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
       case "bathroom":
         headerClass = "text-teal-400";
         headerText = "REQUEST";
+        break;
+      case "water":
+        headerClass = "text-cyan-400";
+        headerText = "WATER";
         break;
       case "error":
         headerClass = "text-red-500";
@@ -482,10 +910,10 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
             className="absolute top-0 left-0 w-full h-full cursor-crosshair z-10"
             onClick={handleCanvasClick}
           ></canvas>
-          {!isCameraActive && (
+          {!(isCameraActive || !!remoteStream) && (
             <div className="absolute inset-0 bg-black bg-opacity-70 text-white flex flex-col items-center justify-center text-center p-4 rounded-tl-md rounded-bl-md">
               <h2 className="text-2xl font-semibold mb-2">Welcome!</h2>
-              <p>Click the &quot;Start Camera&quot; button below to begin.</p>
+              <p>Start your camera or wait for the dependent to connect their feed.</p>
             </div>
           )}
         </div>
@@ -504,15 +932,25 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
 
         {/* Controls Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <button
-            onClick={handleStartStopCamera}
-            className="bg-[#E7473C] hover:bg-red-500 text-white font-bold py-2 px-4 rounded-lg transition-all w-full"
-          >
-            {isCameraActive ? "Stop Camera" : "Start Camera"}
-          </button>
+          {remoteStream && !isCameraActive ? (
+            <button
+              disabled
+              className="bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-all w-full cursor-not-allowed"
+              title="Using remote feed"
+            >
+              Viewing Remote Feed
+            </button>
+          ) : (
+            <button
+              onClick={handleStartStopCamera}
+              className="bg-[#E7473C] hover:bg-red-500 text-white font-bold py-2 px-4 rounded-lg transition-all w-full"
+            >
+              {isCameraActive ? "Stop Camera" : "Start Camera"}
+            </button>
+          )}
           <button
             onClick={handlePatientModeToggle}
-            disabled={!isCameraActive}
+            disabled={!(isCameraActive || !!remoteStream)}
             className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed ${
               currentMode === "patient_monitoring"
                 ? "bg-green-500 hover:bg-green-600 animate-pulse"
@@ -523,6 +961,14 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
               ? "Patient Mode ON"
               : "Patient Mode"}
           </button>
+          <button
+            onClick={handleCalibrateMotion}
+            disabled={!(isCameraActive || !!remoteStream)}
+            className="bg-yellow-600 hover:bg-yellow-700 text-black font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed"
+          >
+            Recalibrate Motion
+          </button>
+
           <button
             onClick={handleSetPerimeter}
             disabled={
@@ -543,16 +989,16 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
             Clear Perimeter
           </button>
           <button
-            onClick={handleBathroomRequest}
-            disabled={!isCameraActive}
-            className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 
-            rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed"
+            onClick={() => onToggleMonitoring ? onToggleMonitoring(!isMonitoring) : undefined}
+            disabled={!onToggleMonitoring || !pairingRoomId}
+            className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full ${isMonitoring ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} ${(!onToggleMonitoring || !pairingRoomId) ? 'opacity-60 cursor-not-allowed' : ''}`}
+            title={isMonitoring ? 'Stop Monitoring' : 'Start Monitoring'}
           >
-            Bathroom
+            {isMonitoring ? 'Stop Monitoring' : 'Start Monitoring'}
           </button>
           <button
             onClick={() => setIsMuted((prev) => !prev)}
-            disabled={!isCameraActive}
+            disabled={!(isCameraActive || !!remoteStream)}
             className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 ${
               isMuted
                 ? "bg-red-600 hover:bg-red-700"
@@ -560,6 +1006,12 @@ export default function MonitoringSystem({ pairingRoomId }: Props) {
             }`}
           >
             {isMuted ? "Unmute" : "Mute"}
+          </button>
+          <button
+            onClick={handleEnableAudio}
+            className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full bg-gray-700 hover:bg-gray-800`}
+          >
+            Enable Audio
           </button>
           {/* Export PDF Button */}
           <button

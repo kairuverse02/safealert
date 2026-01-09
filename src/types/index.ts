@@ -7,6 +7,7 @@ export type LogEntryType =
   | "sound"
   | "patient_motion"
   | "bathroom"
+  | "water"
   | "error"
   | "sos"
   | "info"

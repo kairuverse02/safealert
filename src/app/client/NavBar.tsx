@@ -24,7 +24,11 @@ export default function Navbar({
   // State to track if dropdown is open or closed
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
-  
+  // Pairing status (reads from localStorage.pairingRoomId)
+  const [pairingId, setPairingId] = useState<string | null>(null);
+  const [paired, setPaired] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   // Reference to the dropdown element for click outside detection
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -63,6 +67,71 @@ export default function Navbar({
     };
   }, [isDropdownOpen]);
 
+  // Close dropdown with Escape key
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsDropdownOpen(false);
+      }
+    };
+    if (isDropdownOpen) {
+      document.addEventListener('keydown', onKey);
+    }
+    return () => {
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [isDropdownOpen]);
+
+  // Sync pairing status with localStorage and across tabs
+  useEffect(() => {
+    const check = (maybeId?: string | null) => {
+      try {
+        const id = (typeof maybeId !== 'undefined') ? maybeId : (typeof window !== 'undefined' ? window.localStorage.getItem('pairingRoomId') : null);
+        setPairingId(id);
+        setPaired(Boolean(id));
+      } catch (e) {
+        setPairingId(null);
+        setPaired(false);
+      }
+    };
+
+    check();
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'pairingRoomId') check();
+    };
+    const onPairingChanged = (e: Event) => {
+      try {
+        const ce = e as CustomEvent;
+        check(ce?.detail?.pairingRoomId ?? null);
+      } catch (err) {
+        check();
+      }
+    };
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('pairing-changed', onPairingChanged as EventListener);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('pairing-changed', onPairingChanged as EventListener);
+    };
+  }, []);
+
+  const handleCopyPairingId = async () => {
+    if (!pairingId) return;
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      console.warn('Clipboard not available');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(pairingId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      console.warn('Failed to copy pairing id', e);
+    }
+  }; 
+
 
   return (
     <nav className="bg-white shadow-md">
@@ -94,10 +163,33 @@ export default function Navbar({
             </Link>
           </div>
 
+          {/* RIGHT COLUMN: Pairing status + Profile Icon */}
+          <div className="hidden sm:flex items-center mr-4">
+            {paired ? (
+              <div className="flex items-center space-x-2 bg-green-50 border border-green-200 text-green-800 px-3 py-1 rounded-full text-sm">
+                <span className="h-2 w-2 bg-green-500 rounded-full inline-block" />
+                <span title={pairingId ?? undefined}>{`Paired: ${pairingId ? pairingId.slice(0,8) : 'unknown'}`}</span>
+                <button onClick={handleCopyPairingId} aria-label="Copy pairing id" className="ml-2 text-xs text-green-700 hover:text-green-900">{copied ? 'Copied' : 'Copy'}</button>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500">Not paired</div>
+            )}
+          </div>
+
           {/* RIGHT COLUMN: Profile Icon with Dropdown */}
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={toggleDropdown}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  toggleDropdown();
+                }
+              }}
+              aria-haspopup="menu"
+              aria-expanded={isDropdownOpen}
+              aria-controls="nav-profile-menu"
+              aria-label="Profile menu"
               className="flex items-center focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-full"
             >
               <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold hover:bg-blue-600 transition-colors">
@@ -118,7 +210,7 @@ export default function Navbar({
 
             {/* DROPDOWN MENU */}
             {isDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg py-2 z-50 border border-gray-200">
+              <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg py-2 z-50 border border-gray-200" role="menu" id="nav-profile-menu">
                 
                 <div className="px-4 py-3 border-b border-gray-200">
                   <div className="flex items-start space-x-3">
@@ -136,21 +228,45 @@ export default function Navbar({
                   </div>
                 </div>
 
+                {paired && (
+                  <div className="px-4 py-2 border-b border-gray-200 sm:hidden">
+                    <div className="flex items-center justify-between text-sm text-gray-700">
+                      <div className="truncate mr-2">{pairingId ? `Paired: ${pairingId.slice(0,8)}` : 'Paired'}</div>
+                      <button
+                        onClick={() => {
+                          handleCopyPairingId();
+                          setIsDropdownOpen(false);
+                        }}
+                        aria-label="Copy pairing id"
+                        className="text-xs text-green-700 hover:text-green-900"
+                      >
+                        {copied ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <Link href="/client/account"
+                  onClick={() => setIsDropdownOpen(false)}
+                  role="menuitem"
                   className="w-full flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                 >
                   <Settings size={18} className="mr-3 text-gray-500" />
                   <span>Account Settings</span>
                 </Link>
                 <Link href="/client/privacy"
+                  onClick={() => setIsDropdownOpen(false)}
+                  role="menuitem"
                   className="w-full flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                 >
                   <FileText size={18} className="mr-3 text-gray-500" />
                   <span>Privacy Policy</span>
                 </Link>
                 <button
-                  onClick={handleSignOut}
+                  onClick={() => { setIsDropdownOpen(false); handleSignOut(); }}
                   disabled={isSigningOut}
+                  aria-label="Sign out"
+                  role="menuitem"
                   className="w-full flex items-center px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
                 >
                   {isSigningOut ? (

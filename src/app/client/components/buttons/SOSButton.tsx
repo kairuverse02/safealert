@@ -1,7 +1,8 @@
 'use client'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { sendDependentAction } from '@/lib/signaling-client'
 
 const SOSButton = () => {
   const [showModal, setShowModal] = useState(false)
@@ -11,6 +12,9 @@ const SOSButton = () => {
   const [notified, setNotified] = useState(false)
   const [modalExpired, setModalExpired] = useState(false)
   const [notifiedCountdown, setNotifiedCountdown] = useState(40)
+  const [paired, setPaired] = useState(false)
+  const [toastMessage, setToastMessage] = useState('')
+  const [showToast, setShowToast] = useState(false)
 
   useEffect(() => {
     if (!showModal) {
@@ -21,6 +25,21 @@ const SOSButton = () => {
       setNotifiedCountdown(40)
     }
   }, [showModal])
+
+  // Keep paired state in sync with localStorage and other tabs and same-tab events
+  useEffect(() => {
+    const check = (maybeId?: string | null) => {
+      try { setPaired(Boolean(typeof maybeId !== 'undefined' ? maybeId : (typeof window !== 'undefined' && window.localStorage.getItem('pairingRoomId')))); } catch { setPaired(false); }
+    }
+    check()
+    const onStorage = (e: StorageEvent) => { if (e.key === 'pairingRoomId') check() }
+    const onPairingChanged = (e: Event) => { try { const ce = e as CustomEvent; check(ce?.detail?.pairingRoomId ?? null) } catch { check() } }
+    window.addEventListener('storage', onStorage)
+    window.addEventListener('pairing-changed', onPairingChanged as EventListener)
+    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('pairing-changed', onPairingChanged as EventListener) }
+  }, [])
+
+  const sentRef = useRef(false)
 
   useEffect(() => {
     if (!showModal || modalExpired) return
@@ -46,7 +65,38 @@ const SOSButton = () => {
     }
   }, [countdown, showModal, isConfirmed, notified, modalExpired, notifiedCountdown])
 
+  // send the dependent action to guardian when notified becomes true
+  useEffect(() => {
+    let mounted = true
+    if (notified && !sentRef.current) {
+      sentRef.current = true
+      ;(async () => {
+        try {
+          const res = await sendDependentAction('sos')
+          console.log('SOS sent', res)
+          if (!res.ok) {
+            setToastMessage('Failed to send SOS — not paired or network error')
+            setShowToast(true)
+            setTimeout(() => setShowToast(false), 4000)
+          }
+        } catch (err) {
+          console.warn('Failed to send SOS', err)
+          setToastMessage('Failed to send SOS — network error')
+          setShowToast(true)
+          setTimeout(() => setShowToast(false), 4000)
+        }
+      })()
+    }
+    return () => { mounted = false }
+  }, [notified])
+
   const handleSOSClick = () => {
+    if (!paired) {
+      setToastMessage('Not paired — connect to guardian first')
+      setShowToast(true)
+      setTimeout(() => setShowToast(false), 3000)
+      return
+    }
     setShowModal(true)
   }
 
@@ -160,6 +210,13 @@ const SOSButton = () => {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Small toast for not paired / errors */}
+      {showToast && (
+        <div className={`fixed bottom-4 right-4 ${toastMessage && toastMessage.startsWith('Failed') ? 'bg-red-500' : 'bg-green-500'} text-white font-semibold py-3 px-6 rounded-lg shadow-lg animate-fade-in z-50`}>
+          {toastMessage}
         </div>
       )}
     </>

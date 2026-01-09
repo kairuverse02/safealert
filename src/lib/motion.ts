@@ -9,8 +9,8 @@ export const detectMotion = (
   width: number,
   threshold: number,
   minPixels: number
-): Point[] => {
-  if (!lastFrameData || !currentFrameData || !width) return [];
+): { centroids: Point[]; changedPixels: number } => {
+  if (!lastFrameData || !currentFrameData || !width) return { centroids: [], changedPixels: 0 };
 
   let changedPixels = 0;
   const motionPoints: Point[] = [];
@@ -38,5 +38,5 @@ export const detectMotion = (
     );
     centroids.push({ x: sum.x / motionPoints.length, y: sum.y / motionPoints.length });
   }
-  return centroids;
+  return { centroids, changedPixels };
 };

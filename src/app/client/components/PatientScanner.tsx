@@ -6,6 +6,8 @@ import { Point } from '@/types';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import Peer from 'simple-peer';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { useSoundDetection } from '@/hooks/useSoundDetection';
+import { useAudio } from '@/hooks/useAudio';
 
 interface PatientScannerProps {
   initialRoomId?: string;
@@ -20,17 +22,48 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const peerRef = useRef<Peer.Instance | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const channelRetryRef = useRef<number>(0);
+  const MAX_CHANNEL_RETRIES = 3;
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const currentRoomRef = useRef<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const hasRedirectedRef = useRef<boolean>(false);
   const [perimeterPoints, setPerimeterPoints] = useState<Point[]>([]);
+  // If user triggers a mic test while the peer isn't connected yet, queue it and run on connect
+  const pendingMicTestRef = useRef<boolean>(false);
 
   const supabase = createClient();
   const router = useRouter();
+  const [isMonitoringActive, setIsMonitoringActive] = useState(false);
+  const [micTestStatus, setMicTestStatus] = useState<string>('');
+
+  const { initAudio } = useAudio(false);
+
+  const handlePatientSoundDetected = useCallback(async (message: string) => {
+    try {
+      const rid = currentRoomRef.current;
+      if (!rid) return;
+      const payload = { guardian_event: { type: 'patient_sound', message, time: new Date().toISOString() } };
+      const resp = await fetch(`/api/signaling/${rid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await resp.json().catch(() => null);
+      console.log('Patient: published guardian_event', resp.status, json);
+    } catch (e) {
+      console.warn('Patient: failed to publish guardian_event', e);
+    }
+  }, []);
+
+  const handleSoundError = useCallback((msg: string) => {
+    console.warn('Patient sound detection error', msg);
+  }, []);
+
+  useSoundDetection(!!isMonitoringActive, handlePatientSoundDetected, handleSoundError, initAudio, streamRef.current);
 
   // This is the main pairing function, called by scan or manual input
-const pairDevice = useCallback((roomId: string) => {
+const pairDevice = useCallback(async (roomId: string) => {
     if (isPairing || isPaired) return;
     
     console.log(`Attempting to pair with room: ${roomId}`);
@@ -38,6 +71,10 @@ const pairDevice = useCallback((roomId: string) => {
     
     // Stop the scanner
     scannerRef.current?.clear().catch(e => console.error("Scanner clear failed", e));
+
+    // Check authentication state before starting
+    const { data: { session } } = await supabase.auth.getSession();
+    console.log('[REALTIME] Current auth session:', { user: session?.user?.id, authenticated: !!session });
 
     // 1. Get Patient's camera
     // Note: request audio:false for the initial pairing answer to keep SDP m-line ordering stable
@@ -61,10 +98,61 @@ const pairDevice = useCallback((roomId: string) => {
         });
         peerRef.current = peer;
 
+        // Expose a global helper so other UI (e.g., Dashboard/Bathroom) can trigger a mic test
+        try {
+          (window as any).__patientMicTest = async () => {
+            console.log('[GLOBAL] __patientMicTest called');
+            try {
+              const peerExists = !!peerRef.current;
+              const connected = isPeerConnected();
+
+              // If we don't even have a peer yet, queue until pairing is created
+              if (!peerExists) {
+                pendingMicTestRef.current = true;
+                const status = 'Queued — will run when paired';
+                setMicTestStatus(status);
+                try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status } })); } catch {}
+                console.log('[GLOBAL] __patientMicTest queued until paired (no peer)');
+                return true;
+              }
+
+              // If peer exists but connection not ready, queue until connection
+              if (!connected) {
+                pendingMicTestRef.current = true;
+                const status = 'Queued — will run when peer connection is established';
+                setMicTestStatus(status);
+                try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status } })); } catch {}
+                console.log('[GLOBAL] __patientMicTest queued until peer connection');
+                return true;
+              }
+
+              // Otherwise run immediate test
+              await testMicNow();
+              return true;
+            } catch (e) {
+              console.warn('[GLOBAL] __patientMicTest failure', e);
+              return false;
+            }
+          };
+          // Expose the peer for debug inspection
+          (window as any).__patientPeer = peerRef.current;
+        } catch (e) {
+          console.warn('[GLOBAL] Failed to attach global mic test helper', e);
+        }
+
         // 3. Listen for the Guardian's "offer" via Supabase Realtime and other updates
         currentRoomRef.current = roomId;
+        console.log('[REALTIME] Setting up realtime subscription for room:', roomId);
+        console.log('[REALTIME] Supabase channel state before subscribe:', supabase.getChannels().length);
+
+        if (channelRef.current) {
+          console.log('[REALTIME] Unsubscribing previous channel before creating new one');
+          try { channelRef.current.unsubscribe(); } catch (e) { console.warn('[REALTIME] Failed to unsubscribe previous channel', e); }
+          channelRetryRef.current = 0; // reset retry counter
+        }
+        
         channelRef.current = supabase
-          .channel(`room-${roomId}`)
+          .channel(`room-${roomId}`) 
           .on(
             'postgres_changes',
             {
@@ -77,6 +165,8 @@ const pairDevice = useCallback((roomId: string) => {
               const offer = payload.new.offer_signal;
               const depAction = payload.new.dependent_action;
 
+              console.log('[REALTIME] Dependent received payload update. depAction:', depAction, 'payload:', payload.new);
+
               // Handle offer signaling
               if (offer && peerRef.current) {
                 console.log('Received offer!');
@@ -85,41 +175,122 @@ const pairDevice = useCallback((roomId: string) => {
 
               // Handle guardian requested monitoring actions
               if (depAction === 'start_monitor') {
+                console.log('[START_MONITOR] Guardian requested monitoring. streamRef.current exists?', !!streamRef.current);
                 // start camera and add to peer
                 (async () => {
                   try {
                     if (!streamRef.current) {
-                      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                      streamRef.current = s;
-                      if (myVideoRef.current) myVideoRef.current.srcObject = s;
-                      console.log('Dependent: started camera for monitoring');
-                      if (peerRef.current) {
+                      try {
+                        console.log('[START_MONITOR] Calling getUserMedia for audio+video');
+                        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                        console.log('[START_MONITOR] getUserMedia success. Stream audio tracks:', s.getAudioTracks().length, 'video tracks:', s.getVideoTracks().length);
+                        streamRef.current = s;
+                        const audioCount = s.getAudioTracks().length;
+                        console.log('Dependent: stream audio tracks', audioCount, s.getAudioTracks());
                         try {
-                          if (typeof (peerRef.current as any).addStream === 'function') {
-                            (peerRef.current as any).addStream(s);
-                          } else {
-                            const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                            if (pc) s.getTracks().forEach(t => pc.addTrack(t, s));
+                          console.log('[START_MONITOR] Audio track details:', s.getAudioTracks().map(t => ({ id: t.id, label: t.label, enabled: t.enabled })));
+                          navigator.mediaDevices.enumerateDevices()
+                            .then(devs => console.log('[START_MONITOR] enumerateDevices:', devs))
+                            .catch(e => console.warn('[START_MONITOR] enumerateDevices failed', e));
+                        } catch (e) {
+                          console.warn('[START_MONITOR] Failed to log audio track details', e);
+                        }
+
+                        // If microphone is not available (user denied or no device), inform guardian and do not enable sound detection
+                        if (audioCount === 0) {
+                          console.warn('Dependent: monitoring stream has no audio tracks');
+                          setIsMonitoringActive(false);
+
+                          // Publish a guardian_event to notify guardian that microphone wasn't available/allowed
+                          try {
+                            const rid = currentRoomRef.current;
+                            if (rid) {
+                              const payload = { guardian_event: { type: 'patient_microphone_unavailable', message: 'Dependent did not provide microphone (permission denied or no device).', time: new Date().toISOString() } };
+                              const resp = await fetch(`/api/signaling/${rid}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload),
+                              });
+                              const json = await resp.json().catch(() => null);
+                              console.log('Patient: published microphone-unavailable guardian_event', resp.status, json);
+                            }
+                          } catch (e) {
+                            console.warn('Patient: failed to publish mic unavailable event', e);
+                          }
+
+                          if (myVideoRef.current) myVideoRef.current.srcObject = s;
+                          console.log('Dependent: started camera for monitoring (audio absent)');
+                        } else {
+                          setIsMonitoringActive(true);
+                          if (myVideoRef.current) myVideoRef.current.srcObject = s;
+                          console.log('Dependent: started camera for monitoring');
+                        }
+
+                        if (peerRef.current) {
+                          try {
+                            console.log('[START_MONITOR] Adding stream to peer connection');
+                            const peer = peerRef.current as unknown as { addStream?: (s: MediaStream) => void; _pc?: RTCPeerConnection };
+                            if (typeof peer.addStream === 'function') {
+                              peer.addStream(s);
+                              console.log('[START_MONITOR] Added stream via addStream()');
+                            } else {
+                              const pc = peer._pc;
+                              if (pc) {
+                                s.getTracks().forEach(t => {
+                                  pc.addTrack(t, s);
+                                  console.log('[START_MONITOR] Added track to peer:', t.kind);
+                                });
+                                try {
+                                  console.log('[START_MONITOR] RTCPeerConnection senders after add:', pc.getSenders().map(sd => ({ trackId: sd.track?.id, kind: sd.track?.kind })));
+                                } catch (e) {
+                                  console.warn('[START_MONITOR] Failed to log PC senders', e);
+                                }
+                              }
+                            }
+                          } catch (err) {
+                            console.error('[START_MONITOR] Failed to add stream to peer', err);
+                          }
+                        } else {
+                          console.warn('[START_MONITOR] peerRef.current is not set, cannot add stream');
+                        }
+
+                        // Clear the dependent_action from the row so it doesn't retrigger
+                        try {
+                          const rid = currentRoomRef.current;
+                          if (rid) {
+                            const clearResp = await fetch(`/api/signaling/${rid}`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ dependent_action: null }),
+                            });
+                            const clearJson = await clearResp.json().catch(() => null);
+                            console.log('Cleared dependent_action response', clearResp.status, clearJson);
                           }
                         } catch (err) {
-                          console.error('Failed to add stream to peer', err);
-                        }
-                      }
-
-                      // Clear the dependent_action from the row so it doesn't retrigger
-                      try {
-                        const rid = currentRoomRef.current;
-                        if (rid) {
-                          const clearResp = await fetch(`/api/signaling/${rid}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ dependent_action: null }),
-                          });
-                          const clearJson = await clearResp.json().catch(() => null);
-                          console.log('Cleared dependent_action response', clearResp.status, clearJson);
+                          console.warn('Failed to clear dependent_action', err);
                         }
                       } catch (err) {
-                        console.warn('Failed to clear dependent_action', err);
+                        const error = err as unknown as { message?: string };
+                        console.error('[START_MONITOR] Error getting media:', err);
+
+                        // If permission denied to microphone or camera, publish an event so guardian knows
+                        try {
+                          const rid = currentRoomRef.current;
+                          if (rid) {
+                            const payload = { guardian_event: { type: 'patient_microphone_permission_denied', message: `Dependent denied microphone or camera permission: ${error?.message || String(err)}`, time: new Date().toISOString() } };
+                            console.log('[START_MONITOR] Publishing permission denied event:', payload);
+                            const resp = await fetch(`/api/signaling/${rid}`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(payload),
+                            });
+                            const json = await resp.json().catch(() => null);
+                            console.log('[START_MONITOR] Permission denied event response:', resp.status, json);
+                          }
+                        } catch (e) {
+                          console.warn('[START_MONITOR] Failed to publish mic permission denied event', e);
+                        }
+
                       }
                     }
                   } catch (err) {
@@ -130,6 +301,7 @@ const pairDevice = useCallback((roomId: string) => {
                 if (streamRef.current) {
                   streamRef.current.getTracks().forEach(t => t.stop());
                   streamRef.current = null;
+                  setIsMonitoringActive(false);
                   console.log('Dependent: stopped camera monitoring');
 
                   // clear the dependent_action flag
@@ -173,7 +345,41 @@ const pairDevice = useCallback((roomId: string) => {
               }
             }
           )
-          .subscribe();
+          .subscribe((status: string) => {
+            console.log('[REALTIME] Subscription status:', status);
+            console.log('[REALTIME] Supabase channels active:', supabase.getChannels().length);
+            if (status === 'CHANNEL_ERROR') {
+              console.error('[REALTIME] CHANNEL_ERROR - subscription failed. Check RLS policies on pairing_rooms table');
+              console.error('[REALTIME] Channel state:', channelRef.current?.state);
+              const retries = channelRetryRef.current || 0;
+              if (retries < MAX_CHANNEL_RETRIES) {
+                channelRetryRef.current = retries + 1;
+                console.log(`[REALTIME] Retrying subscription (${channelRetryRef.current}/${MAX_CHANNEL_RETRIES}) in 1000ms`);
+                setTimeout(() => {
+                  try {
+                    if (channelRef.current) {
+                      channelRef.current.unsubscribe();
+                      // attempt to re-subscribe
+                      channelRef.current.subscribe();
+                    } else {
+                      // recreate if missing
+                      channelRef.current = supabase.channel(`room-${roomId}`).subscribe();
+                    }
+                  } catch (e) {
+                    console.warn('[REALTIME] Retry subscribe attempt failed', e);
+                  }
+                }, 1000);
+              } else {
+                console.error('[REALTIME] Subscription retry limit reached');
+              }
+            } else if (status === 'SUBSCRIBED') {
+              console.log('[REALTIME] Successfully subscribed to realtime updates');
+              console.log('[REALTIME] Channel is now listening for UPDATE events on pairing_rooms');
+              channelRetryRef.current = 0; // reset on success
+            } else if (status === 'CLOSED') {
+              console.warn('[REALTIME] Subscription closed');
+            }
+          });
 
         // After subscribing, fetch the current room state in case the guardian already published the offer
         (async () => {
@@ -196,8 +402,8 @@ const pairDevice = useCallback((roomId: string) => {
           console.log('Patient: signal payload', answer);
           console.log('Sending answer/candidate...');
           try {
-            const a = answer as Record<string, any> | undefined;
-            const type = a && typeof a === 'object' && typeof a.type === 'string' ? a.type : 'signal';
+            const a = answer as Record<string, string | object>;
+            const type = (typeof a === 'object' && a !== null && 'type' in a && typeof a.type === 'string') ? a.type : 'signal';
             console.log('Patient: signal event, type', type);
 
             // If this is a candidate-only signal, merge it into the existing answer_signal stored in DB
@@ -209,7 +415,7 @@ const pairDevice = useCallback((roomId: string) => {
                 const cur = await fetch(`/api/signaling/${rid}`);
                 const curJson = await cur.json().catch(() => null);
                 const existing = curJson?.data?.answer_signal;
-                const candidateObj = (a as any).candidate;
+                const candidateObj = (a as Record<string, unknown>).candidate;
 
                 // Build a merged object that preserves any existing SDP or other metadata
                 if (existing) {
@@ -218,7 +424,7 @@ const pairDevice = useCallback((roomId: string) => {
                     : existing.candidate
                       ? [existing.candidate]
                       : [];
-                  const merged: any = {
+                  const merged: Record<string, unknown> = {
                     // preserve all existing fields (including sdp) and ensure candidates array contains previous + new
                     ...existing,
                     candidates: [...prevCandidates, candidateObj],
@@ -311,6 +517,28 @@ const pairDevice = useCallback((roomId: string) => {
                   console.log('RTCPeerConnection connected — updating UI and redirecting');
                   setIsPairing(false);
                   setIsPaired(true);
+
+                  // If a mic test was queued while waiting for connection, run it now
+                  if (pendingMicTestRef.current) {
+                    pendingMicTestRef.current = false;
+                    console.log('[MIC_TEST] running queued mic test now after PC connected');
+                    setMicTestStatus('Running queued mic test...');
+                    try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: 'Running queued mic test...' } })); } catch {}
+                    // run without further queuing
+                    testMicNow();
+                  }
+
+                  // Persist pairing id for other components/tabs
+                  try {
+                    const rid = currentRoomRef.current || roomId;
+                    if (typeof window !== 'undefined' && rid) {
+                      window.localStorage.setItem('pairingRoomId', rid);
+                      window.dispatchEvent(new CustomEvent('pairing-changed', { detail: { pairingRoomId: rid } }));
+                    }
+                  } catch (e) {
+                    console.warn('Failed to persist pairingRoomId to localStorage (connState)', e);
+                  }
+
                   try {
                     if (!hasRedirectedRef.current) {
                       hasRedirectedRef.current = true;
@@ -364,6 +592,18 @@ const pairDevice = useCallback((roomId: string) => {
           console.log('CONNECTED!');
           setIsPairing(false);
           setIsPaired(true);
+
+          // Persist pairing id so other tabs/components can find it (e.g., Water button)
+          try {
+            const rid = currentRoomRef.current || roomId;
+            if (typeof window !== 'undefined' && rid) {
+              window.localStorage.setItem('pairingRoomId', rid);
+              window.dispatchEvent(new CustomEvent('pairing-changed', { detail: { pairingRoomId: rid } }));
+            }
+          } catch (e) {
+            console.warn('Failed to persist pairingRoomId to localStorage', e);
+          }
+
           try {
             router.push('/client/dashboard');
           } catch (err) {
@@ -378,8 +618,7 @@ const pairDevice = useCallback((roomId: string) => {
                 (peerRef.current as any).addStream(s);
               } else {
                 const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                if (pc) s.getTracks().forEach(t => pc.addTrack(t, s));
-              }
+                if (pc) s.getTracks().forEach(t => pc.addTrack(t, s));                try { if (pc) console.log('[CONNECT] pc.getSenders after adding pending stream', pc.getSenders().map(sd => ({ trackId: sd.track?.id, kind: sd.track?.kind }))); } catch(e) { console.warn('[CONNECT] failed to log pc.getSenders', e); }              }
             } catch (err) {
               console.error('Failed to add pending stream on connect', err);
             }
@@ -389,6 +628,16 @@ const pairDevice = useCallback((roomId: string) => {
         peer.on('close', () => {
           console.log('Peer connection closed');
           setIsPaired(false);
+          try { setIsMonitoringActive(false); } catch {}
+          try {
+            if (typeof window !== 'undefined') {
+              window.localStorage.removeItem('pairingRoomId');
+              window.dispatchEvent(new CustomEvent('pairing-changed', { detail: { pairingRoomId: null } }));
+            }
+          } catch (e) {
+            console.warn('Failed to clear pairingRoomId on peer close', e);
+          }
+          try { delete (window as any).__patientMicTest; delete (window as any).__patientPeer; } catch (e) {}
         });
 
       })
@@ -457,9 +706,19 @@ const pairDevice = useCallback((roomId: string) => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
         streamRef.current = null;
+        setIsMonitoringActive(false);
       }
       channelRef.current?.unsubscribe();
       peerRef.current?.destroy();
+
+      try {
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem('pairingRoomId');
+          window.dispatchEvent(new CustomEvent('pairing-changed', { detail: { pairingRoomId: null } }));
+        }
+      } catch (e) {
+        console.warn('Failed to clear pairingRoomId on unmount', e);
+      }
     };
   }, [isPaired, isPairing, pairDevice, initialRoomId]); // Re-run if we disconnect
 
@@ -481,6 +740,102 @@ const pairDevice = useCallback((roomId: string) => {
     }
   };
 
+  const isPeerConnected = () => !!(peerRef.current && (peerRef.current as any).connected);
+
+  const testMicNow = async () => {
+    console.log('[MIC_TEST] manual mic test starting');
+    const peerExists = !!peerRef.current;
+    if (!peerExists) {
+      const st = 'Pairing required — connect to guardian first';
+      setMicTestStatus(st);
+      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: st } })); } catch {}
+      console.warn('[MIC_TEST] cannot run test - not paired (no peer)');
+      return;
+    }
+
+    if (!isPeerConnected()) {
+      // Queue the mic test to run when PC connects
+      pendingMicTestRef.current = true;
+      const st = 'Queued — will run when peer connection is established';
+      setMicTestStatus(st);
+      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: st } })); } catch {}
+      console.log('[MIC_TEST] queued until peer connected');
+      return;
+    }
+
+    const started = 'Testing...';
+    setMicTestStatus(started);
+    try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: started } })); } catch {}
+
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioCount = s.getAudioTracks().length;
+      console.log('[MIC_TEST] got mic stream, audio tracks:', audioCount, s.getAudioTracks());
+      const ok = `OK — ${audioCount} audio track(s) found (${new Date().toLocaleTimeString()})`;
+      setMicTestStatus(ok);
+      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: ok } })); } catch {}
+
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        console.log('[MIC_TEST] devices', devices);
+      } catch (e) {
+        console.warn('[MIC_TEST] enumerateDevices failed', e);
+      }
+
+      // publish a mic test event so guardian can correlate the incoming audio
+      try {
+        const rid = currentRoomRef.current;
+        if (rid) {
+          const payload = { guardian_event: { type: 'patient_mic_test_start', message: 'Dependent started mic test', time: new Date().toISOString() } };
+          const resp = await fetch(`/api/signaling/${rid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          const json = await resp.json().catch(() => null);
+          console.log('[MIC_TEST] published mic_test_start event', resp.status, json);
+        }
+      } catch (e) {
+        console.warn('[MIC_TEST] failed to publish mic_test_start', e);
+      }
+
+      const pc = (peerRef.current as any)?._pc as RTCPeerConnection | undefined;
+      if (pc) {
+        s.getTracks().forEach(t => {
+          try {
+            const sender = pc.addTrack(t, s);
+            console.log('[MIC_TEST] added mic track to pc, sender trackId:', sender?.track?.id);
+          } catch (e) {
+            console.warn('[MIC_TEST] failed to add mic track to pc', e);
+          }
+        });
+        try { console.log('[MIC_TEST] pc.getSenders', pc.getSenders().map(sd => ({ trackId: sd.track?.id, kind: sd.track?.kind }))); } catch(e) { console.warn('[MIC_TEST] failed to read pc.senders', e); }
+      } else {
+        console.warn('[MIC_TEST] peer._pc not available');
+      }
+
+      // stop tracks after short period
+      setTimeout(() => {
+        s.getTracks().forEach(t => t.stop());
+        const stopped = (ok + ' — stopped');
+        setMicTestStatus(prev => prev + ' — stopped');
+        try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: stopped } })); } catch {}
+      }, 5000);
+    } catch (err) {
+      console.error('[MIC_TEST] failed to get mic', err);
+      const e: any = err;
+      const failed = `Failed: ${String(e?.message || e)}`;
+      setMicTestStatus(failed);
+      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: failed } })); } catch {}
+    }
+  };
+
+  // listen for mic test requests from other components (e.g., Bathroom button)
+  useEffect(() => {
+    const handler = () => {
+      console.log('[MIC_TEST_EVENT] Received dependent-mic-test event');
+      testMicNow();
+    };
+    window.addEventListener('dependent-mic-test', handler as EventListener);
+    return () => window.removeEventListener('dependent-mic-test', handler as EventListener);
+  }, [testMicNow]);
+
   // --- RENDER LOGIC ---
 
   if (isPaired) {
@@ -491,6 +846,31 @@ const pairDevice = useCallback((roomId: string) => {
           <div style={{ flex: 1 }}>
             <p style={{ fontWeight: 'bold' }}>Your Camera (sending)</p>
             <video ref={myVideoRef} autoPlay playsInline muted style={{ width: '100%', background: '#000' }} />
+
+            {/* Visible mic test controls near the camera preview */}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+              <button
+                onClick={() => { console.log('[UI_BUTTON] Test Microphone clicked (camera area)'); testMicNow(); }}
+                disabled={!isPaired}
+                title={!isPaired ? 'Pair with a guardian first' : 'Test microphone (will queue until connection)'}
+                style={{ padding: '8px 12px', fontWeight: 'bold', backgroundColor: '#f97316', color: 'white', border: 'none', borderRadius: 6, cursor: isPaired ? 'pointer' : 'not-allowed', opacity: isPaired ? 1 : 0.6 }}
+              >
+                Test Microphone
+              </button>
+
+              {/* Debug: Force test regardless of connection (visible in dev only) */}
+              {process.env.NODE_ENV === 'development' && (
+                <button
+                  onClick={() => { console.log('[DEBUG] Force Test Microphone clicked'); testMicNow(); }}
+                  title="Force test (debug)"
+                  style={{ padding: '8px 12px', fontWeight: 'bold', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+                >
+                  Force Test (debug)
+                </button>
+              )}
+
+              <div style={{ fontSize: 12, color: '#444' }}>{micTestStatus || (isPeerConnected() ? 'No recent test' : 'Waiting for connection...')}</div>
+            </div>
           </div>
           <div style={{ flex: 1 }}>
             <p style={{ fontWeight: 'bold' }}>Guardian View (receiving)</p>
@@ -515,6 +895,14 @@ const pairDevice = useCallback((roomId: string) => {
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <button onClick={() => sendDependentAction('bathroom')} style={{ flex: 1, padding: 10, fontWeight: 'bold' }}>Bathroom</button>
           <button onClick={() => sendDependentAction('sos')} style={{ flex: 1, padding: 10, fontWeight: 'bold' }}>SOS</button>
+          <button
+            onClick={testMicNow}
+            disabled={!isPaired}
+            title={!isPaired ? 'Pair with a guardian first' : 'Test microphone (will queue until connection)'}
+            style={{ flex: 1, padding: 10, fontWeight: 'bold', backgroundColor: '#f97316', color: 'white', border: 'none', borderRadius: 6, cursor: isPaired ? 'pointer' : 'not-allowed', opacity: isPaired ? 1 : 0.6 }}
+          >
+            Test Mic
+          </button>
         </div>
       </div>
     );
