@@ -21,7 +21,6 @@ export default function Navbar({
   const router = useRouter();
   // const supabase = createClient();
   
-  // Track if dropdown is open or closed
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   
@@ -80,7 +79,6 @@ export default function Navbar({
           <div>
             <Link href="/admin"
               className="flex gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded">
-              {/* 💡 IconLogo */}
               <Image
                 src="/assets/iconlogo.png"
                 alt="Logo Icon"
@@ -88,7 +86,6 @@ export default function Navbar({
                 height={40}
                 className="h-10 w-auto cursor-pointer"
               />
-              {/* 💡 TextLogo */}
               <Image
                 src="/assets/textlogo.svg"
                 alt="Brand Name"
@@ -101,7 +98,6 @@ export default function Navbar({
 
           {/* RIGHT COLUMN: Profile Icon with Dropdown */}
           <div className="relative" ref={dropdownRef}>
-            {/* ✨ FIX: Wait for mount before rendering user-dependent UI */}
             {!isMounted ? (
               // Render a placeholder to match server render
               <div className="h-10 w-10 rounded-full bg-gray-200" />
@@ -135,7 +131,7 @@ export default function Navbar({
                     {/* FIRST ITEM: User Info */}
                     <div className="px-4 py-3 border-b border-gray-200">
                       <div className="flex items-start space-x-3">
-                        <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold flex-shrink-0">
+                        <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold flex-shrink-0 cursor-pointer">
                           <User size={20} />
                         </div>
                         <div className="flex-1 min-w-0">

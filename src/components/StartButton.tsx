@@ -28,12 +28,12 @@ const LoginButton = () => {
 
   return (
     <Button 
-      className="w-60 h-14 text-2xl font-medium bg-[#E7473C] cursor-pointer flex items-center justify-center gap-2"
+      className="w-60 h-14 text-2xl font-bold bg-gradient-to-r from-[#E7473C] to-[#D63A31] hover:shadow-lg hover:shadow-[#E7473C]/50 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 rounded-full active:scale-95 disabled:opacity-70"
       onClick={handleClick}
       disabled={isLoading}
     >
       {isLoading ? (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           <span className="h-2 w-2 bg-white rounded-full animate-bounce" style={{ animationDelay: "0s" }}></span>
           <span className="h-2 w-2 bg-white rounded-full animate-bounce" style={{ animationDelay: "0.2s" }}></span>
           <span className="h-2 w-2 bg-white rounded-full animate-bounce" style={{ animationDelay: "0.4s" }}></span>
