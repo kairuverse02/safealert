@@ -89,7 +89,7 @@ export default function Navbar({
         const id = (typeof maybeId !== 'undefined') ? maybeId : (typeof window !== 'undefined' ? window.localStorage.getItem('pairingRoomId') : null);
         setPairingId(id);
         setPaired(Boolean(id));
-      } catch (e) {
+      } catch {
         setPairingId(null);
         setPaired(false);
       }
@@ -104,7 +104,7 @@ export default function Navbar({
       try {
         const ce = e as CustomEvent;
         check(ce?.detail?.pairingRoomId ?? null);
-      } catch (err) {
+      } catch {
         check();
       }
     };

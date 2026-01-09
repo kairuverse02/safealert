@@ -46,21 +46,21 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   const [micTestStatus, setMicTestStatus] = useState<string>('');
 
   // Ensure we redirect only once and provide a fallback if `router.push` fails
-  const doRedirectToDashboard = (delay = 0) => {
+  const doRedirectToDashboard = useCallback((delay = 0) => {
     try {
       if (hasRedirectedRef.current) return;
       hasRedirectedRef.current = true;
       if (router && typeof (router as unknown as { push?: (url: string) => unknown }).push === 'function') {
         setTimeout(() => {
-          try { (router as unknown as { push?: (url: string) => void }).push?.('/client/dashboard'); } catch (e) { window.location.href = '/client/dashboard'; }
+          try { (router as unknown as { push?: (url: string) => void }).push?.('/client/dashboard'); } catch { window.location.href = '/client/dashboard'; }
         }, delay);
       } else {
         setTimeout(() => { window.location.href = '/client/dashboard'; }, delay);
       }
-    } catch (e) {
+    } catch {
       try { window.location.href = '/client/dashboard'; } catch (err) { console.warn('Redirect failed', err); }
     }
-  };
+  }, [router]);
 
   const { initAudio } = useAudio(false);
 
@@ -87,8 +87,94 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
 
   useSoundDetection(!!isMonitoringActive, handlePatientSoundDetected, handleSoundError, initAudio, streamRef.current);
 
+  // --- Mic test helper (stable) ---
+  const testMicNow = useCallback(async () => {
+    console.log('[MIC_TEST] manual mic test starting');
+    const peerExists = !!peerRef.current;
+    if (!peerExists) {
+      const st = 'Pairing required — connect to guardian first';
+      setMicTestStatus(st);
+      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: st } })); } catch {}
+      console.warn('[MIC_TEST] cannot run test - not paired (no peer)');
+      return;
+    }
+
+    if (!isPeerConnected()) {
+      // Queue the mic test to run when PC connects
+      pendingMicTestRef.current = true;
+      const st = 'Queued — will run when peer connection is established';
+      setMicTestStatus(st);
+      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: st } })); } catch {}
+      console.log('[MIC_TEST] queued until peer connected');
+      return;
+    }
+
+    const started = 'Testing...';
+    setMicTestStatus(started);
+    try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: started } })); } catch {}
+
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioCount = s.getAudioTracks().length;
+      console.log('[MIC_TEST] got mic stream, audio tracks:', audioCount, s.getAudioTracks());
+      const ok = `OK — ${audioCount} audio track(s) found (${new Date().toLocaleTimeString()})`;
+      setMicTestStatus(ok);
+      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: ok } })); } catch {}
+
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        console.log('[MIC_TEST] devices', devices);
+      } catch (_e) {
+        console.warn('[MIC_TEST] enumerateDevices failed', _e);
+      }
+
+      // publish a mic test event so guardian can correlate the incoming audio
+      try {
+        const rid = currentRoomRef.current;
+        if (rid) {
+          const payload = { guardian_event: { type: 'patient_mic_test_start', message: 'Dependent started mic test', time: new Date().toISOString() } };
+          const resp = await fetch(`/api/signaling/${rid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          const json = await resp.json().catch(() => null);
+          console.log('[MIC_TEST] published mic_test_start event', resp.status, json);
+        }
+      } catch (_e) {
+        console.warn('[MIC_TEST] failed to publish mic_test_start', _e);
+      }
+
+      const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+      if (pc) {
+        s.getTracks().forEach(t => {
+          try {
+            const sender = pc.addTrack(t, s);
+            console.log('[MIC_TEST] added mic track to pc, sender trackId:', sender?.track?.id);
+          } catch (_e) {
+            console.warn('[MIC_TEST] failed to add mic track to pc', _e);
+          }
+        });
+        try { console.log('[MIC_TEST] pc.getSenders', pc.getSenders().map(sd => ({ trackId: sd.track?.id, kind: sd.track?.kind }))); } catch(_e) { console.warn('[MIC_TEST] failed to read pc.senders', _e); }
+      } else {
+        console.warn('[MIC_TEST] peer._pc not available');
+      }
+
+      // stop tracks after short period
+      setTimeout(() => {
+        s.getTracks().forEach(t => t.stop());
+        const stopped = (ok + ' — stopped');
+        setMicTestStatus(prev => prev + ' — stopped');
+        try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: stopped } })); } catch {}
+      }, 5000);
+    } catch (err) {
+      console.error('[MIC_TEST] failed to get mic', err);
+      const e = err as unknown;
+      const message = (typeof e === 'object' && e !== null && 'message' in e) ? (e as { message?: unknown }).message : undefined;
+      const failed = `Failed: ${typeof message === 'string' ? message : String(e)}`;
+      setMicTestStatus(failed);
+      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: failed } })); } catch {}
+    }
+  }, []);
+
   // This is the main pairing function, called by scan or manual input
-const pairDevice = useCallback(async (roomId: string) => {
+  const pairDevice = useCallback(async (roomId: string) => {
     if (isPairing || isPaired) return;
     
     console.log(`Attempting to pair with room: ${roomId}`);
@@ -490,7 +576,6 @@ const pairDevice = useCallback(async (roomId: string) => {
                 const answerMCount = (sdp.match(/^m=/gm) || []).length;
                 console.log('Patient: answer m-line count', answerMCount);
                 // also attempt to log offer m-line count if we have it
-                const offerSdp = (currentRoomRef.current) ? null : null; // placeholder, fetch below if needed
                 // We can fetch the room to get the offer for comparison
                 try {
                   const rid = roomId;
@@ -505,7 +590,7 @@ const pairDevice = useCallback(async (roomId: string) => {
                   console.warn('Patient: failed to fetch offer for m-line diagnostic', e);
                 }
               }
-            } catch (e) {
+            } catch {
               /* ignore */
             }
 
@@ -599,7 +684,7 @@ const pairDevice = useCallback(async (roomId: string) => {
               remoteVideoRef.current.muted = true;
               remoteVideoRef.current.play().catch(e => console.warn('Patient remote video play failed', e));
             }
-          } catch (e) {
+          } catch {
             // fallback
             const el = document.getElementById('remoteVideo') as HTMLVideoElement | null;
             if (el) {
@@ -672,7 +757,7 @@ const pairDevice = useCallback(async (roomId: string) => {
         console.error('Failed to get media:', err);
         setIsPairing(false);
       });
-    }, [supabase, isPairing, isPaired, router]);
+    }, [supabase, isPairing, isPaired, doRedirectToDashboard, testMicNow]);
 
   const handlePastePair = async () => {
     try {
@@ -768,91 +853,6 @@ const pairDevice = useCallback(async (roomId: string) => {
   };
 
   const isPeerConnected = () => !!(peerRef.current && ((peerRef.current as unknown as { connected?: boolean }).connected));
-
-  const testMicNow = async () => {
-    console.log('[MIC_TEST] manual mic test starting');
-    const peerExists = !!peerRef.current;
-    if (!peerExists) {
-      const st = 'Pairing required — connect to guardian first';
-      setMicTestStatus(st);
-      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: st } })); } catch {}
-      console.warn('[MIC_TEST] cannot run test - not paired (no peer)');
-      return;
-    }
-
-    if (!isPeerConnected()) {
-      // Queue the mic test to run when PC connects
-      pendingMicTestRef.current = true;
-      const st = 'Queued — will run when peer connection is established';
-      setMicTestStatus(st);
-      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: st } })); } catch {}
-      console.log('[MIC_TEST] queued until peer connected');
-      return;
-    }
-
-    const started = 'Testing...';
-    setMicTestStatus(started);
-    try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: started } })); } catch {}
-
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const audioCount = s.getAudioTracks().length;
-      console.log('[MIC_TEST] got mic stream, audio tracks:', audioCount, s.getAudioTracks());
-      const ok = `OK — ${audioCount} audio track(s) found (${new Date().toLocaleTimeString()})`;
-      setMicTestStatus(ok);
-      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: ok } })); } catch {}
-
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        console.log('[MIC_TEST] devices', devices);
-      } catch (e) {
-        console.warn('[MIC_TEST] enumerateDevices failed', e);
-      }
-
-      // publish a mic test event so guardian can correlate the incoming audio
-      try {
-        const rid = currentRoomRef.current;
-        if (rid) {
-          const payload = { guardian_event: { type: 'patient_mic_test_start', message: 'Dependent started mic test', time: new Date().toISOString() } };
-          const resp = await fetch(`/api/signaling/${rid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-          const json = await resp.json().catch(() => null);
-          console.log('[MIC_TEST] published mic_test_start event', resp.status, json);
-        }
-      } catch (e) {
-        console.warn('[MIC_TEST] failed to publish mic_test_start', e);
-      }
-
-      const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-      if (pc) {
-        s.getTracks().forEach(t => {
-          try {
-            const sender = pc.addTrack(t, s);
-            console.log('[MIC_TEST] added mic track to pc, sender trackId:', sender?.track?.id);
-          } catch (e) {
-            console.warn('[MIC_TEST] failed to add mic track to pc', e);
-          }
-        });
-        try { console.log('[MIC_TEST] pc.getSenders', pc.getSenders().map(sd => ({ trackId: sd.track?.id, kind: sd.track?.kind }))); } catch(e) { console.warn('[MIC_TEST] failed to read pc.senders', e); }
-      } else {
-        console.warn('[MIC_TEST] peer._pc not available');
-      }
-
-      // stop tracks after short period
-      setTimeout(() => {
-        s.getTracks().forEach(t => t.stop());
-        const stopped = (ok + ' — stopped');
-        setMicTestStatus(prev => prev + ' — stopped');
-        try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: stopped } })); } catch {}
-      }, 5000);
-    } catch (err) {
-      console.error('[MIC_TEST] failed to get mic', err);
-      const e = err as unknown;
-      const message = (typeof e === 'object' && e !== null && 'message' in e) ? (e as { message?: unknown }).message : undefined;
-      const failed = `Failed: ${typeof message === 'string' ? message : String(e)}`;
-      setMicTestStatus(failed);
-      try { window.dispatchEvent(new CustomEvent('mic-test-status', { detail: { status: failed } })); } catch {}
-    }
-  };
 
   // listen for mic test requests from other components (e.g., Bathroom button)
   useEffect(() => {

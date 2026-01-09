@@ -1,7 +1,6 @@
 'use client'
 import React, { useState, useEffect } from 'react'
 import {Button} from '@/components/ui/button'
-import { Bath } from 'lucide-react'
 import { sendDependentAction } from '@/lib/signaling-client'
 
 const Bathroom = () => {

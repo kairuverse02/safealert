@@ -20,7 +20,6 @@ import { useAudio } from "@/hooks/useAudio";
 import { createClient } from "@/lib/supabase/client";
 import { useCamera } from "@/hooks/useCamera";
 import { usePerimeter } from "@/hooks/usePerimeter";
-import { useSOS } from "@/hooks/useSOS";
 import { useSoundDetection } from "@/hooks/useSoundDetection";
 
 type Props = {
@@ -58,7 +57,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     currentModeRef.current = currentMode;
   }, [currentMode]);
 
-  const { initAudio, playSound, synthRef } = useAudio(isMuted);
+  const { initAudio, playSound } = useAudio(isMuted);
 
   const triggerAlert = useCallback(
     async (message: string, type: LogEntryType = "perimeter") => {
@@ -130,7 +129,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
         })();
       }
     },
-    [playSound, pairingRoomId]
+    [initAudio, playSound, pairingRoomId]
   );
 
   const { startCamera, stopCamera, streamRef, isCameraActive } = useCamera(
@@ -298,7 +297,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
         // Update overlay stats for UI
         try {
           setMotionStats({ changedPixels: changed, percent, movingSum, avgPercent, centroidDelta, brightnessAvg, brightnessDelta });
-        } catch (e) {}
+        } catch {}
       }
     }
 
@@ -360,7 +359,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
       if (currentMode === 'patient_monitoring' && isCameraActive && !calibratedRef.current) {
         handleCalibrateMotion();
       }
-    } catch (e) {}
+    } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentMode, isCameraActive]);
 
@@ -369,7 +368,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     if (videoRef.current) {
       try {
         // Log audio track count for diagnostics
-        try { console.log('MonitoringSystem: remoteStream audio tracks', remoteStream ? remoteStream.getAudioTracks().length : 0); } catch (e) {}
+        try { console.log('MonitoringSystem: remoteStream audio tracks', remoteStream ? remoteStream.getAudioTracks().length : 0); } catch {}
 
         // If remoteStream is falsy, clear the srcObject and stop any playback
         if (!remoteStream) {
@@ -460,7 +459,6 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
 
     // Choose the video source: prefer attached videoRef (local or remote). If not available, create a hidden video element for remoteStream
     let video: HTMLVideoElement | null = null;
-    let createdTempVideo = false;
     try {
       if (videoRef.current && (isCameraActive || videoRef.current.srcObject)) {
         video = videoRef.current;
@@ -471,13 +469,12 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
         video.muted = true;
         video.playsInline = true;
         try { video.srcObject = remoteStream; } catch (e) { console.warn('MonitoringSystem: failed to set temp video srcObject', e); }
-        createdTempVideo = true;
         // wait for metadata or timeout to ensure videoWidth/videoHeight are available
         await new Promise((resolve) => {
           let settled = false;
           const onMeta = () => { if (!settled) { settled = true; resolve(null); } };
           video!.addEventListener('loadedmetadata', onMeta);
-          const t = setTimeout(() => { if (!settled) { settled = true; resolve(null); } }, 1500);
+          setTimeout(() => { if (!settled) { settled = true; resolve(null); } }, 1500);
         });
       }
 
@@ -497,9 +494,9 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
       const medians: number[] = [];
 
       for (let i = 0; i < samples; i++) {
-        try { tctx.drawImage(video!, 0, 0, tempCanvas.width, tempCanvas.height); } catch (e) { break; }
+        try { tctx.drawImage(video!, 0, 0, tempCanvas.width, tempCanvas.height); } catch { break; }
         let data;
-        try { data = tctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height).data; } catch (e) { break; }
+        try { data = tctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height).data; } catch { break; }
         if (lastData) {
           const diffs: number[] = [];
           const step = 4; // finer sampling for sensitivity
@@ -539,11 +536,11 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     } finally {
       calibrationRef.current = false;
       try {
-        // cleanup temp video if we created one
-        if (((video as unknown) as { _isTemp?: boolean })?._isTemp) {
-          try { ((video as unknown) as { srcObject?: MediaStream | null }).srcObject = null; } catch {};
+        // cleanup temp video if it was a separate element
+        if (video && video !== videoRef.current) {
+          try { ((video as unknown) as { srcObject?: MediaStream | null }).srcObject = null; } catch {}
         }
-      } catch (e) {}
+      } catch {}
     }
   }; 
 
@@ -558,7 +555,8 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     }
   };
 
-  const handleBathroomRequest = () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleBathroomRequest = () => {
     initAudio();
     playSound("bathroom");
     setLogEntries((prev) => [
@@ -717,7 +715,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
         (payload: unknown) => {
           try {
             console.log('MonitoringSystem: raw room update payload', JSON.stringify(payload));
-          } catch (e) {
+          } catch {
             console.log('MonitoringSystem: raw room update payload (failed to stringify)', payload);
           }
         }
@@ -837,7 +835,8 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     }
   };
 
-  const [motionStats, setMotionStats] = useState({ changedPixels: 0, percent: 0, movingSum: 0, avgPercent: 0, centroidDelta: 0, brightnessAvg: 0, brightnessDelta: 0 });
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_motionStats, setMotionStats] = useState({ changedPixels: 0, percent: 0, movingSum: 0, avgPercent: 0, centroidDelta: 0, brightnessAvg: 0, brightnessDelta: 0 });
   const lastBrightnessRef = useRef<number | null>(null);
   const prevMeanRef = useRef<{ x: number; y: number } | null>(null);
 

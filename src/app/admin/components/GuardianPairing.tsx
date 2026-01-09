@@ -22,7 +22,6 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
   const [isMonitoring, setIsMonitoring] = useState<boolean>(false);
   const peerRef = useRef<Peer.Instance | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const answerPollRef = useRef<number | null>(null); // interval id for polling answer as a fallback
@@ -34,16 +33,16 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
   const applyingAnswerRef = useRef(false);
   const [remoteStreamState, setRemoteStreamState] = useState<MediaStream | null>(null);
   const [showMonitoring, setShowMonitoring] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted] = useState(false);
   const [localCameraActive, setLocalCameraActive] = useState(false);
-  const [localCameraError, setLocalCameraError] = useState<string | null>(null);
+  const [, setLocalCameraError] = useState<string | null>(null);
   const hasAddedRecvTransceiverRef = useRef(false); // avoid duplicate recv transceiver additions
 
   // Mic test diagnostics: timestamp (ms) when dependent requested a mic test
   const [micTestRequestAt, setMicTestRequestAt] = useState<number | null>(null);
   // UI indicators: whether a mic test was recently requested and whether audio was received as part of a mic test
-  const [micTestRequested, setMicTestRequested] = useState<boolean>(false);
-  const [micTestAudioReceived, setMicTestAudioReceived] = useState<boolean>(false);
+  const [, setMicTestRequested] = useState<boolean>(false);
+  const [, setMicTestAudioReceived] = useState<boolean>(false);
 
   const startLocalCamera = async () => {
     try {
@@ -278,8 +277,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                               }
                             }
                           }
-                        } catch (e) {
-                          console.warn('Guardian: failed to add recv transceiver', e);
+} catch (_e) {
+                  console.warn('Guardian: failed to add recv transceiver', _e);
                         }
 
                         peerRef.current.signal(ans);
@@ -347,9 +346,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             }
           })();
         }
-      } catch (e) {
-        // noop
-      }
+      } catch {}
+
     });
 
     // Attach connection state logging if underlying RTCPeerConnection is available
@@ -365,15 +363,16 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           pc.oniceconnectionstatechange = () => console.log('Guardian PC ICE state:', pc.iceConnectionState);
           pc.onconnectionstatechange = () => {
             const connState = (pc as RTCPeerConnection).connectionState || pc.iceConnectionState;
+            console.log('Guardian PC connection state:', connState);
           };
 
           try {
             pc.onicecandidate = (evt: RTCPeerConnectionIceEvent) => console.log('Guardian PC onicecandidate', evt && evt.candidate);
-          } catch (e) {}
+          } catch {}
 
           try {
             console.log('Guardian PC transceivers at attach:', pc.getTransceivers ? pc.getTransceivers() : []);
-          } catch (e) {}
+          } catch {}
 
           // If the guardian has no local camera active, proactively add a recvonly transceiver
           try {
@@ -384,12 +383,12 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                 pc.addTransceiver('audio', { direction: 'recvonly' });
                 console.log('Guardian: proactively added recvonly video and audio transceivers at attach');
                 hasAddedRecvTransceiverRef.current = true;
-                try { console.log('Guardian PC transceivers after proactive add:', pc.getTransceivers ? pc.getTransceivers() : []); } catch (e) {}
+                try { console.log('Guardian PC transceivers after proactive add:', pc.getTransceivers ? pc.getTransceivers() : []); } catch {}
               } catch (e) {
                 console.warn('Guardian: failed to proactively add recv transceivers', e);
               }
             }
-          } catch (e) {}
+          } catch {}
 
           // Fallback: listen for individual track events and build a MediaStream if simple-peer 'stream' doesn't fire
           try {
@@ -421,7 +420,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                     setTimeout(() => setMicTestAudioReceived(false), 8000);
                     console.log('[MIC_TEST] Guardian: ontrack produced a MediaStream with audio tracks; set micTestAudioReceived=true');
                   }
-                } catch (e) { console.warn('[MIC_TEST] failed to check constructed MediaStream for audio tracks', e); }
+                } catch (_e) { console.warn('[MIC_TEST] failed to check constructed MediaStream for audio tracks', _e); }
 
                 setRemoteStreamState(ms);
                 setTimeout(() => setShowMonitoring(true), 150);
@@ -429,7 +428,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                 console.warn('Guardian PC ontrack handler failed', e);
               }
             };
-          } catch (e) {}
+          } catch {}
         } else {
           setTimeout(tryAttach, 200);
         }
@@ -468,8 +467,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                 console.warn('[MIC_TEST] Guardian: dependent reported microphone unavailable', ge);
               }
             }
-          } catch (e) {
-            console.warn('Failed to process guardian_event in realtime payload', e);
+          } catch (_e) {
+            console.warn('Failed to process guardian_event in realtime payload', _e);
           }
 
           const answer = payload.new.answer_signal;
@@ -543,7 +542,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                     console.warn('Guardian: failed to add recv transceiver (realtime candidates)', e);
                   }
                 }
-              } catch (e) {}
+              } catch {}
 
               (answer.candidates as RTCIceCandidateInit[]).forEach((c) => {
                 try {

@@ -33,7 +33,7 @@ export function useSoundDetection(
           if ((existingStream.getAudioTracks && existingStream.getAudioTracks().length === 0) || !existingStream.getAudioTracks) {
             skipMicFallback = true;
             console.warn('Provided MediaStream has no audio tracks — cannot analyze for sound on guardian side.');
-            try { onError('Remote stream has no audio track. Ensure the dependent started monitoring and allowed microphone access.', 'error'); } catch (e) {}
+            try { onError('Remote stream has no audio track. Ensure the dependent started monitoring and allowed microphone access.', 'error'); } catch {}
           } else {
             const toneCtx = Tone as unknown as { context?: { rawContext?: AudioContext | null } };
             const rawCtx = (toneCtx && toneCtx.context && toneCtx.context.rawContext) || (typeof window !== 'undefined' && (window.AudioContext ? new (window.AudioContext)() : null));
@@ -62,7 +62,7 @@ export function useSoundDetection(
         }
       } else if (!analyserRef.current && skipMicFallback) {
         console.warn('Sound detection disabled: no analyser and skipping local mic fallback.');
-        try { onError('Sound detection unavailable: remote stream has no audio and local microphone was not opened to avoid prompting guardian for mic access.', 'error'); } catch (e) {}
+        try { onError('Sound detection unavailable: remote stream has no audio and local microphone was not opened to avoid prompting guardian for mic access.', 'error'); } catch {}
       }
 
       if (intervalRef.current) clearInterval(intervalRef.current);
