@@ -50,9 +50,9 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
     try {
       if (hasRedirectedRef.current) return;
       hasRedirectedRef.current = true;
-      if (router && typeof (router as any).push === 'function') {
+      if (router && typeof (router as unknown as { push?: (url: string) => unknown }).push === 'function') {
         setTimeout(() => {
-          try { (router as any).push('/client/dashboard'); } catch (e) { window.location.href = '/client/dashboard'; }
+          try { (router as unknown as { push?: (url: string) => void }).push?.('/client/dashboard'); } catch (e) { window.location.href = '/client/dashboard'; }
         }, delay);
       } else {
         setTimeout(() => { window.location.href = '/client/dashboard'; }, delay);
