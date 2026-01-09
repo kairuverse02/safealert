@@ -45,6 +45,23 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   const [isMonitoringActive, setIsMonitoringActive] = useState(false);
   const [micTestStatus, setMicTestStatus] = useState<string>('');
 
+  // Ensure we redirect only once and provide a fallback if `router.push` fails
+  const doRedirectToDashboard = (delay = 0) => {
+    try {
+      if (hasRedirectedRef.current) return;
+      hasRedirectedRef.current = true;
+      if (router && typeof (router as any).push === 'function') {
+        setTimeout(() => {
+          try { (router as any).push('/client/dashboard'); } catch (e) { window.location.href = '/client/dashboard'; }
+        }, delay);
+      } else {
+        setTimeout(() => { window.location.href = '/client/dashboard'; }, delay);
+      }
+    } catch (e) {
+      try { window.location.href = '/client/dashboard'; } catch (err) { console.warn('Redirect failed', err); }
+    }
+  };
+
   const { initAudio } = useAudio(false);
 
   const handlePatientSoundDetected = useCallback(async (message: string) => {
@@ -549,8 +566,7 @@ const pairDevice = useCallback(async (roomId: string) => {
 
                   try {
                     if (!hasRedirectedRef.current) {
-                      hasRedirectedRef.current = true;
-                      router.push('/client/dashboard');
+                      doRedirectToDashboard();
                     }
                   } catch (err) {
                     console.warn('Router push failed', err);
@@ -613,7 +629,7 @@ const pairDevice = useCallback(async (roomId: string) => {
           }
 
           try {
-            router.push('/client/dashboard');
+            doRedirectToDashboard();
           } catch (err) {
             console.warn('Router push failed', err);
           }
