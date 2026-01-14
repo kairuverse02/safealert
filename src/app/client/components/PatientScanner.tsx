@@ -409,6 +409,48 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           channelRetryRef.current = 0; // reset retry counter
         }
         
+        // Add a short-poll fallback in case realtime events are missed (e.g., cross-device or mobile edge cases)
+        const pollRef = { id: null as number | null };
+        const startPollingForActions = (room: string) => {
+          try {
+            if (typeof window === 'undefined') return;
+            if (pollRef.id) return; // already polling
+            console.log('[POLL] Starting fallback poll for dependent_action');
+            pollRef.id = window.setInterval(async () => {
+              try {
+                const r = await fetch(`/api/signaling/${room}`);
+                const j = await r.json().catch(() => null);
+                const dep = j?.data?.dependent_action;
+                if (dep) {
+                  console.log('[POLL] Found dependent_action via poll', dep);
+                  if (dep === 'start_monitor') {
+                    try {
+                      await handleStartMonitoringAction();
+                    } catch (err) {
+                      console.warn('[POLL] start_monitor handler failed', err);
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn('[POLL] poll failed', e);
+              }
+            }, 2000);
+          } catch (e) {
+            console.warn('[POLL] startPollingForActions error', e);
+          }
+        };
+        const stopPollingForActions = () => {
+          try {
+            if (pollRef.id) {
+              clearInterval(pollRef.id);
+              pollRef.id = null;
+              console.log('[POLL] Stopped fallback poll');
+            }
+          } catch (e) {
+            console.warn('[POLL] stopPollingForActions error', e);
+          }
+        };
+
         channelRef.current = supabase
           .channel(`room-${roomId}`) 
           .on(
@@ -423,6 +465,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               const offer = payload.new.offer_signal;
               const depAction = payload.new.dependent_action;
 
+              // Always log full payload for debugging cross-device update issues
               console.log('[REALTIME] Dependent received payload update. depAction:', depAction, 'payload:', payload.new);
 
               // Handle offer signaling
@@ -521,8 +564,15 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               console.log('[REALTIME] Successfully subscribed to realtime updates');
               console.log('[REALTIME] Channel is now listening for UPDATE events on pairing_rooms');
               channelRetryRef.current = 0; // reset on success
+
+              // Start fallback poll in case realtime events are missed
+              try {
+                startPollingForActions(roomId);
+              } catch (e) { console.warn('[POLL] failed to start after subscribe', e); }
+
             } else if (status === 'CLOSED') {
               console.warn('[REALTIME] Subscription closed');
+              try { stopPollingForActions(); } catch (e) { console.warn('[POLL] failed stop on close', e); }
             }
           });
 
@@ -548,6 +598,11 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                   console.warn('[INIT_FETCH] start_monitor handler failed', err);
                 }
               }
+
+              // Ensure fallback poll starts here as well (catch edge case where subscribe event was missed)
+              try {
+                startPollingForActions(roomId);
+              } catch (e) { console.warn('[POLL] failed to start after initial fetch', e); }
             }
           } catch (e) {
             console.warn('Error fetching room state', e);
