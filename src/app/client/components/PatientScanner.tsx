@@ -44,6 +44,9 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   const router = useRouter();
   const [isMonitoringActive, setIsMonitoringActive] = useState(false);
   const [micTestStatus, setMicTestStatus] = useState<string>('');
+  // Debug helpers: surface last received dependent_action and current pairing room
+  const [lastDependentAction, setLastDependentAction] = useState<string | null>(null);
+  const [currentRoomIdState, setCurrentRoomIdState] = useState<string | null>(initialRoomId || null);
 
   // Robust redirect helper: attempt redirect unless already on dashboard, with guarded retries
   const doRedirectToDashboard = useCallback((delay = 0) => {
@@ -423,6 +426,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                 const dep = j?.data?.dependent_action;
                 if (dep) {
                   console.log('[POLL] Found dependent_action via poll', dep);
+                  try { setLastDependentAction(dep); } catch (e) { console.warn('[POLL] failed to set lastDependentAction', e); }
                   if (dep === 'start_monitor') {
                     try {
                       await handleStartMonitoringAction();
@@ -467,6 +471,13 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
 
               // Always log full payload for debugging cross-device update issues
               console.log('[REALTIME] Dependent received payload update. depAction:', depAction, 'payload:', payload.new);
+
+              // Update debug state so the UI shows the last action (helps confirm same room)
+              try {
+                if (depAction) {
+                  setLastDependentAction(depAction);
+                }
+              } catch (e) { console.warn('[REALTIME] failed to set lastDependentAction', e); }
 
               // Handle offer signaling
               if (offer && peerRef.current) {
@@ -593,6 +604,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               if (json?.data?.dependent_action === 'start_monitor') {
                 console.log('[INIT_FETCH] Found dependent_action=start_monitor in initial fetch, handling it');
                 try {
+                  try { setLastDependentAction('start_monitor'); } catch {}
                   await handleStartMonitoringAction();
                 } catch (err) {
                   console.warn('[INIT_FETCH] start_monitor handler failed', err);
@@ -971,6 +983,10 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
     return (
       <div style={styles.container}>
         <h2 style={styles.title}>Connected</h2>
+        <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+          <div><strong>Room:</strong> {currentRoomIdState || currentRoomRef.current || '—'}</div>
+          <div><strong>Last action:</strong> {lastDependentAction || '—'}</div>
+        </div>
         <div style={{ display: 'flex', gap: 12, width: '100%' }}>
           <div style={{ flex: 1 }}>
             <p style={{ fontWeight: 'bold' }}>Your Camera (sending)</p>
@@ -1050,6 +1066,10 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   return (
     <div style={styles.container}>
       <h2 style={styles.title}>Pair with Guardian</h2>
+      <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+        <div><strong>Room:</strong> {currentRoomIdState || currentRoomRef.current || '—'}</div>
+        <div><strong>Last action:</strong> {lastDependentAction || '—'}</div>
+      </div>
       
       {/* Paste-only Join UI (scanner removed) */}
       <div style={{ marginTop: 8, marginBottom: 16 }}>
