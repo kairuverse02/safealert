@@ -337,6 +337,13 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                           console.log('Dependent: started camera for monitoring');
                         }
 
+                        // Redirect dependent to the dashboard so the monitoring UI is shown
+                        try {
+                          doRedirectToDashboard(500);
+                        } catch (e) {
+                          console.warn('Failed to redirect to dashboard on start_monitor', e);
+                        }
+
                         if (peerRef.current) {
                           try {
                             console.log('[START_MONITOR] Adding stream to peer connection');
