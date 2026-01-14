@@ -173,6 +173,126 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
     }
   }, []);
 
+  // Reusable start_monitor handler so we catch actions that were set before we subscribed
+  const handleStartMonitoringAction = useCallback(async () => {
+    try {
+      if (!streamRef.current) {
+        console.log('[START_MONITOR_HANDLER] Calling getUserMedia for audio+video');
+        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        console.log('[START_MONITOR_HANDLER] getUserMedia success. Stream audio tracks:', s.getAudioTracks().length, 'video tracks:', s.getVideoTracks().length);
+        streamRef.current = s;
+        const audioCount = s.getAudioTracks().length;
+        console.log('Dependent: stream audio tracks', audioCount, s.getAudioTracks());
+        try {
+          console.log('[START_MONITOR_HANDLER] Audio track details:', s.getAudioTracks().map(t => ({ id: t.id, label: t.label, enabled: t.enabled })));
+          navigator.mediaDevices.enumerateDevices()
+            .then(devs => console.log('[START_MONITOR_HANDLER] enumerateDevices:', devs))
+            .catch(e => console.warn('[START_MONITOR_HANDLER] enumerateDevices failed', e));
+        } catch (e) {
+          console.warn('[START_MONITOR_HANDLER] Failed to log audio track details', e);
+        }
+
+        // If microphone is not available (user denied or no device), inform guardian and do not enable sound detection
+        if (audioCount === 0) {
+          console.warn('Dependent: monitoring stream has no audio tracks');
+          setIsMonitoringActive(false);
+
+          // Publish a guardian_event to notify guardian that microphone wasn't available/allowed
+          try {
+            const rid = currentRoomRef.current;
+            if (rid) {
+              const payload = { guardian_event: { type: 'patient_microphone_unavailable', message: 'Dependent did not provide microphone (permission denied or no device).', time: new Date().toISOString() } };
+              const resp = await fetch(`/api/signaling/${rid}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+              });
+              const json = await resp.json().catch(() => null);
+              console.log('Patient: published microphone-unavailable guardian_event', resp.status, json);
+            }
+          } catch (e) {
+            console.warn('Patient: failed to publish mic unavailable event', e);
+          }
+
+          if (myVideoRef.current) myVideoRef.current.srcObject = s;
+          console.log('Dependent: started camera for monitoring (audio absent)');
+        } else {
+          setIsMonitoringActive(true);
+          if (myVideoRef.current) myVideoRef.current.srcObject = s;
+          console.log('Dependent: started camera for monitoring');
+        }
+
+        if (peerRef.current) {
+          try {
+            console.log('[START_MONITOR_HANDLER] Adding stream to peer connection');
+            const peer = peerRef.current as unknown as { addStream?: (s: MediaStream) => void; _pc?: RTCPeerConnection };
+            if (typeof peer.addStream === 'function') {
+              peer.addStream(s);
+              console.log('[START_MONITOR_HANDLER] Added stream via addStream()');
+            } else {
+              const pc = peer._pc;
+              if (pc) {
+                s.getTracks().forEach(t => {
+                  pc.addTrack(t, s);
+                  console.log('[START_MONITOR_HANDLER] Added track to peer:', t.kind);
+                });
+                try { console.log('[START_MONITOR_HANDLER] RTCPeerConnection senders after add:', pc.getSenders().map(sd => ({ trackId: sd.track?.id, kind: sd.track?.kind }))); } catch (e) { console.warn('[START_MONITOR_HANDLER] Failed to log PC senders', e); }
+              }
+            }
+          } catch (err) {
+            console.error('[START_MONITOR_HANDLER] Failed to add stream to peer', err);
+          }
+        } else {
+          console.warn('[START_MONITOR_HANDLER] peerRef.current is not set, cannot add stream');
+        }
+
+        // Clear the dependent_action from the row so it doesn't retrigger
+        try {
+          const rid = currentRoomRef.current;
+          if (rid) {
+            const clearResp = await fetch(`/api/signaling/${rid}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ dependent_action: null }),
+            });
+            const clearJson = await clearResp.json().catch(() => null);
+            console.log('Cleared dependent_action response', clearResp.status, clearJson);
+          }
+        } catch (err) {
+          console.warn('Failed to clear dependent_action', err);
+        }
+      }
+
+      try {
+        // Redirect dependent to the dashboard so the monitoring UI is shown
+        doRedirectToDashboard(500);
+      } catch (e) {
+        console.warn('Failed to redirect to dashboard on start_monitor', e);
+      }
+    } catch (err) {
+      const error = err as unknown as { message?: string };
+      console.error('[START_MONITOR_HANDLER] Error starting media for monitoring:', err);
+
+      // If permission denied to microphone or camera, publish an event so guardian knows
+      try {
+        const rid = currentRoomRef.current;
+        if (rid) {
+          const payload = { guardian_event: { type: 'patient_microphone_permission_denied', message: `Dependent denied microphone or camera permission: ${error?.message || String(err)}`, time: new Date().toISOString() } };
+          console.log('[START_MONITOR_HANDLER] Publishing permission denied event:', payload);
+          const resp = await fetch(`/api/signaling/${rid}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const json = await resp.json().catch(() => null);
+          console.log('[START_MONITOR_HANDLER] Permission denied event response:', resp.status, json);
+        }
+      } catch (e) {
+        console.warn('[START_MONITOR_HANDLER] Failed to publish mic permission denied event', e);
+      }
+    }
+  }, [doRedirectToDashboard]);
+
   // This is the main pairing function, called by scan or manual input
   const pairDevice = useCallback(async (roomId: string) => {
     if (isPairing || isPaired) return;
@@ -287,132 +407,12 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               // Handle guardian requested monitoring actions
               if (depAction === 'start_monitor') {
                 console.log('[START_MONITOR] Guardian requested monitoring. streamRef.current exists?', !!streamRef.current);
-                // start camera and add to peer
+                // Delegate to shared handler
                 (async () => {
                   try {
-                    if (!streamRef.current) {
-                      try {
-                        console.log('[START_MONITOR] Calling getUserMedia for audio+video');
-                        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                        console.log('[START_MONITOR] getUserMedia success. Stream audio tracks:', s.getAudioTracks().length, 'video tracks:', s.getVideoTracks().length);
-                        streamRef.current = s;
-                        const audioCount = s.getAudioTracks().length;
-                        console.log('Dependent: stream audio tracks', audioCount, s.getAudioTracks());
-                        try {
-                          console.log('[START_MONITOR] Audio track details:', s.getAudioTracks().map(t => ({ id: t.id, label: t.label, enabled: t.enabled })));
-                          navigator.mediaDevices.enumerateDevices()
-                            .then(devs => console.log('[START_MONITOR] enumerateDevices:', devs))
-                            .catch(e => console.warn('[START_MONITOR] enumerateDevices failed', e));
-                        } catch (e) {
-                          console.warn('[START_MONITOR] Failed to log audio track details', e);
-                        }
-
-                        // If microphone is not available (user denied or no device), inform guardian and do not enable sound detection
-                        if (audioCount === 0) {
-                          console.warn('Dependent: monitoring stream has no audio tracks');
-                          setIsMonitoringActive(false);
-
-                          // Publish a guardian_event to notify guardian that microphone wasn't available/allowed
-                          try {
-                            const rid = currentRoomRef.current;
-                            if (rid) {
-                              const payload = { guardian_event: { type: 'patient_microphone_unavailable', message: 'Dependent did not provide microphone (permission denied or no device).', time: new Date().toISOString() } };
-                              const resp = await fetch(`/api/signaling/${rid}`, {
-                                method: 'PATCH',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(payload),
-                              });
-                              const json = await resp.json().catch(() => null);
-                              console.log('Patient: published microphone-unavailable guardian_event', resp.status, json);
-                            }
-                          } catch (e) {
-                            console.warn('Patient: failed to publish mic unavailable event', e);
-                          }
-
-                          if (myVideoRef.current) myVideoRef.current.srcObject = s;
-                          console.log('Dependent: started camera for monitoring (audio absent)');
-                        } else {
-                          setIsMonitoringActive(true);
-                          if (myVideoRef.current) myVideoRef.current.srcObject = s;
-                          console.log('Dependent: started camera for monitoring');
-                        }
-
-                        // Redirect dependent to the dashboard so the monitoring UI is shown
-                        try {
-                          doRedirectToDashboard(500);
-                        } catch (e) {
-                          console.warn('Failed to redirect to dashboard on start_monitor', e);
-                        }
-
-                        if (peerRef.current) {
-                          try {
-                            console.log('[START_MONITOR] Adding stream to peer connection');
-                            const peer = peerRef.current as unknown as { addStream?: (s: MediaStream) => void; _pc?: RTCPeerConnection };
-                            if (typeof peer.addStream === 'function') {
-                              peer.addStream(s);
-                              console.log('[START_MONITOR] Added stream via addStream()');
-                            } else {
-                              const pc = peer._pc;
-                              if (pc) {
-                                s.getTracks().forEach(t => {
-                                  pc.addTrack(t, s);
-                                  console.log('[START_MONITOR] Added track to peer:', t.kind);
-                                });
-                                try {
-                                  console.log('[START_MONITOR] RTCPeerConnection senders after add:', pc.getSenders().map(sd => ({ trackId: sd.track?.id, kind: sd.track?.kind })));
-                                } catch (e) {
-                                  console.warn('[START_MONITOR] Failed to log PC senders', e);
-                                }
-                              }
-                            }
-                          } catch (err) {
-                            console.error('[START_MONITOR] Failed to add stream to peer', err);
-                          }
-                        } else {
-                          console.warn('[START_MONITOR] peerRef.current is not set, cannot add stream');
-                        }
-
-                        // Clear the dependent_action from the row so it doesn't retrigger
-                        try {
-                          const rid = currentRoomRef.current;
-                          if (rid) {
-                            const clearResp = await fetch(`/api/signaling/${rid}`, {
-                              method: 'PATCH',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ dependent_action: null }),
-                            });
-                            const clearJson = await clearResp.json().catch(() => null);
-                            console.log('Cleared dependent_action response', clearResp.status, clearJson);
-                          }
-                        } catch (err) {
-                          console.warn('Failed to clear dependent_action', err);
-                        }
-                      } catch (err) {
-                        const error = err as unknown as { message?: string };
-                        console.error('[START_MONITOR] Error getting media:', err);
-
-                        // If permission denied to microphone or camera, publish an event so guardian knows
-                        try {
-                          const rid = currentRoomRef.current;
-                          if (rid) {
-                            const payload = { guardian_event: { type: 'patient_microphone_permission_denied', message: `Dependent denied microphone or camera permission: ${error?.message || String(err)}`, time: new Date().toISOString() } };
-                            console.log('[START_MONITOR] Publishing permission denied event:', payload);
-                            const resp = await fetch(`/api/signaling/${rid}`, {
-                              method: 'PATCH',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify(payload),
-                            });
-                            const json = await resp.json().catch(() => null);
-                            console.log('[START_MONITOR] Permission denied event response:', resp.status, json);
-                          }
-                        } catch (e) {
-                          console.warn('[START_MONITOR] Failed to publish mic permission denied event', e);
-                        }
-
-                      }
-                    }
+                    await handleStartMonitoringAction();
                   } catch (err) {
-                    console.error('Failed to start camera for monitoring', err);
+                    console.error('[START_MONITOR] handler failed', err);
                   }
                 })();
               } else if (depAction === 'stop_monitor') {
@@ -506,9 +506,21 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
             const json = await resp.json();
             if (!resp.ok) {
               console.warn('Failed to fetch room state', json);
-            } else if (json?.data?.offer_signal && peerRef.current) {
-              console.log('Fetched existing offer from room state, signaling peer');
-              peerRef.current.signal(json.data.offer_signal);
+            } else {
+              if (json?.data?.offer_signal && peerRef.current) {
+                console.log('Fetched existing offer from room state, signaling peer');
+                peerRef.current.signal(json.data.offer_signal);
+              }
+
+              // If guardian already requested monitoring before we subscribed, handle it now
+              if (json?.data?.dependent_action === 'start_monitor') {
+                console.log('[INIT_FETCH] Found dependent_action=start_monitor in initial fetch, handling it');
+                try {
+                  await handleStartMonitoringAction();
+                } catch (err) {
+                  console.warn('[INIT_FETCH] start_monitor handler failed', err);
+                }
+              }
             }
           } catch (e) {
             console.warn('Error fetching room state', e);
@@ -764,7 +776,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
         console.error('Failed to get media:', err);
         setIsPairing(false);
       });
-    }, [supabase, isPairing, isPaired, doRedirectToDashboard, testMicNow]);
+    }, [supabase, isPairing, isPaired, doRedirectToDashboard, testMicNow, handleStartMonitoringAction]);
 
   const handlePastePair = async () => {
     try {
