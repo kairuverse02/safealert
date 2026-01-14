@@ -45,20 +45,47 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   const [isMonitoringActive, setIsMonitoringActive] = useState(false);
   const [micTestStatus, setMicTestStatus] = useState<string>('');
 
-  // Ensure we redirect only once and provide a fallback if `router.push` fails
+  // Robust redirect helper: attempt redirect unless already on dashboard, with guarded retries
   const doRedirectToDashboard = useCallback((delay = 0) => {
     try {
-      if (hasRedirectedRef.current) return;
-      hasRedirectedRef.current = true;
+      // If we're already on the dashboard, skip redirect
+      const alreadyOnDashboard = typeof window !== 'undefined' && window.location && typeof window.location.pathname === 'string' && window.location.pathname.startsWith('/client/dashboard');
+      if (alreadyOnDashboard) {
+        console.log('[REDIRECT] Already on dashboard; skipping redirect');
+        return;
+      }
+
+      // Track simple attempt counter on window to avoid infinite retries across calls
+      const attemptsKey = '__doRedirectAttempts';
+      const w = typeof window !== 'undefined' ? (window as unknown as Record<string, unknown>) : undefined;
+      const attempts = (w && typeof w[attemptsKey] === 'number') ? (w[attemptsKey] as number) : 0;
+      if (attempts >= 3) {
+        console.warn('[REDIRECT] Max redirect attempts reached; aborting');
+        return;
+      }
+      if (typeof window !== 'undefined') (window as unknown as Record<string, number>)[attemptsKey] = attempts + 1;
+
+      // Try router.push first, fallback to location.href. We still set hasRedirectedRef after scheduling.
       if (router && typeof (router as unknown as { push?: (url: string) => unknown }).push === 'function') {
         setTimeout(() => {
-          try { (router as unknown as { push?: (url: string) => void }).push?.('/client/dashboard'); } catch { window.location.href = '/client/dashboard'; }
+          try {
+            (router as unknown as { push?: (url: string) => void }).push?.('/client/dashboard');
+          } catch (e) {
+            console.warn('[REDIRECT] router.push failed, falling back to location.href', e);
+            try { window.location.href = '/client/dashboard'; } catch (err) { console.warn('[REDIRECT] fallback failed', err); }
+          }
         }, delay);
       } else {
-        setTimeout(() => { window.location.href = '/client/dashboard'; }, delay);
+        setTimeout(() => {
+          try { window.location.href = '/client/dashboard'; } catch (err) { console.warn('[REDIRECT] location.href redirect failed', err); }
+        }, delay);
       }
-    } catch {
-      try { window.location.href = '/client/dashboard'; } catch (err) { console.warn('Redirect failed', err); }
+
+      // mark that we've attempted at least one redirect
+      hasRedirectedRef.current = true;
+    } catch (err) {
+      console.warn('[REDIRECT] unexpected error while redirecting', err);
+      try { window.location.href = '/client/dashboard'; } catch (err2) { console.warn('[REDIRECT] fallback failed again', err2); }
     }
   }, [router]);
 
