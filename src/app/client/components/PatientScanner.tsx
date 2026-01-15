@@ -275,7 +275,35 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
             const audioTrack = s.getAudioTracks()[0];
             
             console.log('[START_MONITOR_HANDLER] Adding tracks to peer connection. Video:', !!videoTrack, 'Audio:', !!audioTrack);
-            console.log('[START_MONITOR_HANDLER] PC state - connection:', pc.connectionState, 'ice:', pc.iceConnectionState, 'signing:', pc.signalingState);
+            console.log('[START_MONITOR_HANDLER] PC state BEFORE renegotiation - connection:', pc.connectionState, 'ice:', pc.iceConnectionState, 'signing:', pc.signalingState);
+            
+            // CRITICAL: Check if PC is still in "new" state - if so, wait for connection to stabilize
+            if (pc.connectionState === 'new' || pc.signalingState !== 'stable') {
+              console.log('[START_MONITOR_HANDLER] WARNING: PC not ready for renegotiation. Connection state:', pc.connectionState, ', Signaling state:', pc.signalingState);
+              console.log('[START_MONITOR_HANDLER] Waiting for connection to stabilize before adding tracks...');
+              
+              // Wait up to 10 seconds for connection to reach a stable state
+              let waitCount = 0;
+              const maxWait = 100; // 10 seconds total (100 * 100ms)
+              
+              await new Promise<void>((resolve) => {
+                const checkState = setInterval(() => {
+                  waitCount++;
+                  const canAdd = pc.signalingState === 'stable' && (pc.connectionState === 'connected' || pc.connectionState === 'connecting');
+                  console.log(`[START_MONITOR_HANDLER] Wait check ${waitCount}: connectionState=${pc.connectionState}, signalingState=${pc.signalingState}, canAdd=${canAdd}`);
+                  
+                  if (canAdd || waitCount >= maxWait) {
+                    clearInterval(checkState);
+                    if (waitCount >= maxWait) {
+                      console.warn('[START_MONITOR_HANDLER] Timeout waiting for PC to stabilize. Will attempt to add tracks anyway.');
+                    } else {
+                      console.log('[START_MONITOR_HANDLER] PC is now ready for renegotiation');
+                    }
+                    resolve();
+                  }
+                }, 100);
+              });
+            }
             
             if (videoTrack) {
               try {
