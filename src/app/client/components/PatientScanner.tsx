@@ -794,13 +794,17 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
             const pc = (p as unknown as { _pc?: RTCPeerConnection })?._pc;
             if (pc) {
               console.log('[PC_ATTACH] RTCPeerConnection available, attaching handlers');
+              console.log('[PC_ATTACH] Initial PC state:', { connectionState: pc.connectionState, iceConnectionState: pc.iceConnectionState, iceGatheringState: pc.iceGatheringState });
+              
               pc.oniceconnectionstatechange = () => {
                 const iceState = pc.iceConnectionState;
                 console.log('[PC_ICE] Patient PC ICE state changed:', iceState);
               };
+              
               pc.onconnectionstatechange = () => {
                 const connState = pc.connectionState || pc.iceConnectionState;
-                console.log('[PC_CONN] Patient PC connection state changed:', connState);
+                console.log('[PC_CONN] Patient PC connection state changed:', connState, '(connectionState:', pc.connectionState, ', iceConnectionState:', pc.iceConnectionState, ')');
+                
                 // If the underlying RTCPeerConnection reports connected, treat it as paired
                 if (connState === 'connected') {
                   console.log('[PC_CONN] RTCPeerConnection CONNECTED — updating UI and redirecting');
@@ -840,10 +844,21 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                   }
                 } else if (connState === 'failed') {
                   console.warn('[PC_CONN] RTCPeerConnection entered failed state');
-                  setIsPairing(false);
-                  setIsPaired(false);
+                  // Don't set paired=false yet; allow timeout fallback to redirect
                 }
               };
+
+              // Fallback: after 8 seconds, if not yet paired, redirect anyway (peer may be functional despite connection state issues)
+              const timeoutId = setTimeout(() => {
+                if (!hasRedirectedRef.current) {
+                  console.log('[PC_TIMEOUT] 8s timeout reached without connection; attempting redirect anyway');
+                  try {
+                    doRedirectToDashboard();
+                  } catch (err) {
+                    console.warn('[PC_TIMEOUT] Timeout redirect failed', err);
+                  }
+                }
+              }, 8000);
             } else {
               console.log('[PC_ATTACH] RTCPeerConnection not yet available, retrying in 200ms');
               setTimeout(tryAttach, 200);
