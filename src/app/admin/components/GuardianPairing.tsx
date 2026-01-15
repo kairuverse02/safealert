@@ -24,6 +24,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
   const channelRef = useRef<RealtimeChannel | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null); // Accumulate all remote tracks here
   const answerPollRef = useRef<number | null>(null); // interval id for polling answer as a fallback
   const hasStartedPollingRef = useRef(false);
   // Track whether an answer SDP has already been applied to avoid duplicate signaling
@@ -378,11 +379,11 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           try {
             if (!localCameraActive && typeof pc.addTransceiver === 'function' && !hasAddedRecvTransceiverRef.current) {
               try {
-                // Add video, audio, and data channel recvonly transceivers to match dependent's offer structure
+                // Add video and audio recvonly transceivers so dependent can send media
+                // Note: data channels are created automatically by simple-peer, not via addTransceiver
                 pc.addTransceiver('video', { direction: 'recvonly' });
                 pc.addTransceiver('audio', { direction: 'recvonly' });
-                pc.addTransceiver('application', { direction: 'recvonly' });
-                console.log('Guardian: proactively added recvonly video, audio, and data channel transceivers at attach');
+                console.log('Guardian: proactively added recvonly video and audio transceivers at attach');
                 hasAddedRecvTransceiverRef.current = true;
                 try { console.log('Guardian PC transceivers after proactive add:', pc.getTransceivers ? pc.getTransceivers() : []); } catch {}
               } catch (e) {
@@ -397,34 +398,35 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
               try {
                 console.log('Guardian PC ontrack event (raw):', ev);
                 console.log('[MIC_TEST] ontrack: track info:', { kind: ev.track?.kind, id: ev.track?.id, label: ev.track?.label });
-                if (Array.isArray(ev.streams) && ev.streams.length) {
-                  console.log('[MIC_TEST] ontrack: streams present count:', ev.streams.length);
-                  ev.streams.forEach((st: MediaStream, idx: number) => {
-                    console.log(`[MIC_TEST] ontrack: stream[${idx}] audioTracks:`, st.getAudioTracks().map(t => ({ id: t.id, label: t.label, enabled: t.enabled })));
-                  });
-                } else {
-                  console.log('[MIC_TEST] ontrack: no streams array, falling back to ev.track');
+                
+                // Initialize remoteStream if it doesn't exist
+                if (!remoteStreamRef.current) {
+                  remoteStreamRef.current = new MediaStream();
+                  console.log('Guardian: created new remoteStream to accumulate tracks');
                 }
 
-                const tracks = Array.isArray(ev.streams) && ev.streams.length ? ev.streams[0].getTracks() : (ev.track ? [ev.track] : []);
-                const ms = new MediaStream();
-                tracks.forEach((t: MediaStreamTrack) => ms.addTrack(t));
-                console.log('[MIC_TEST] constructed fallback MediaStream audioTracks:', ms.getAudioTracks().map(t => ({ id: t.id, label: t.label, enabled: t.enabled })));
+                // Add this track to the accumulating stream
+                const currentRemoteStream = remoteStreamRef.current;
+                if (ev.track && !currentRemoteStream.getTracks().find(t => t.id === ev.track.id)) {
+                  currentRemoteStream.addTrack(ev.track);
+                  console.log('Guardian: added', ev.track.kind, 'track to remoteStream; total tracks:', currentRemoteStream.getTracks().length);
+                }
 
-                if (micTestRequestAt) console.log('[MIC_TEST] ontrack arrived AFTER mic test request at', new Date(micTestRequestAt).toISOString());
+                // Log track counts for diagnostics
+                const videoTracks = currentRemoteStream.getVideoTracks().length;
+                const audioTracks = currentRemoteStream.getAudioTracks().length;
+                console.log('Guardian: remoteStream now has', videoTracks, 'video and', audioTracks, 'audio tracks');
 
-                // If the constructed MediaStream has audio tracks, mark audio-received
-                try {
-                  const audioCount = ms.getAudioTracks().length;
-                  if (audioCount > 0) {
-                    setMicTestAudioReceived(true);
-                    setTimeout(() => setMicTestAudioReceived(false), 8000);
-                    console.log('[MIC_TEST] Guardian: ontrack produced a MediaStream with audio tracks; set micTestAudioReceived=true');
-                  }
-                } catch (_e) { console.warn('[MIC_TEST] failed to check constructed MediaStream for audio tracks', _e); }
-
-                setRemoteStreamState(ms);
+                // Update state with the accumulated stream
+                setRemoteStreamState(currentRemoteStream);
                 setTimeout(() => setShowMonitoring(true), 150);
+
+                // Mark audio received if we have audio tracks (for mic test diagnostics)
+                if (audioTracks > 0) {
+                  setMicTestAudioReceived(true);
+                  setTimeout(() => setMicTestAudioReceived(false), 8000);
+                  console.log('[MIC_TEST] Guardian: ontrack produced audio tracks; set micTestAudioReceived=true');
+                }
               } catch (e) {
                 console.warn('Guardian PC ontrack handler failed', e);
               }
