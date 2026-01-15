@@ -466,7 +466,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           table: "pairing_rooms",
           filter: `id=eq.${id}`,
         },
-        (payload: { new: { answer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; guardian_event?: { type?: string; [key: string]: unknown } | null } }) => {
+        (payload: { new: { offer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; answer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; guardian_event?: { type?: string; [key: string]: unknown } | null } }) => {
           // Detect guardian_event messages published by the dependent (e.g., mic test start, mic unavailable, permission denied)
           try {
             const ge = payload.new.guardian_event;
@@ -487,6 +487,19 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             }
           } catch (_e) {
             console.warn('Failed to process guardian_event in realtime payload', _e);
+          }
+
+          // Handle renegotiation offer from dependent (when monitoring starts after pairing)
+          const offer = payload.new.offer_signal;
+          if (offer && peerRef.current && offer.type === 'offer' && offer.sdp) {
+            try {
+              console.log('[REALTIME] Received renegotiation offer from dependent during monitoring');
+              // Signal the offer to simple-peer, which will trigger answer generation
+              peerRef.current.signal(offer as Peer.SignalData | string);
+              console.log('[REALTIME] Renegotiation offer signaled to peer');
+            } catch (err) {
+              console.error('[REALTIME] Failed to apply renegotiation offer', err);
+            }
           }
 
           const answer = payload.new.answer_signal;

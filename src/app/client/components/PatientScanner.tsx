@@ -332,7 +332,8 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
             });
             
             // CRITICAL: Force renegotiation by creating an offer
-            // When in responder mode (dependent), simple-peer needs an explicit offer to trigger renegotiation
+            // When in responder mode (dependent), simple-peer doesn't emit 'signal' for renegotiation
+            // We must manually create offer, set it, AND send it to guardian
             console.log('[START_MONITOR_HANDLER] Forcing renegotiation: creating offer to send to initiator...');
             try {
               const offer = await pc.createOffer({ iceRestart: false });
@@ -341,9 +342,21 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               await pc.setLocalDescription(offer);
               console.log('[START_MONITOR_HANDLER] Set local description with new offer');
               
-              // Send the offer via simple-peer signal event (will be caught by our signal handler)
-              // simple-peer will emit this as a 'signal' event with the offer
-              console.log('[START_MONITOR_HANDLER] Offer will be sent to guardian via realtime...');
+              // IMPORTANT: Manually send offer to guardian via API
+              // Simple-peer doesn't emit 'signal' for renegotiation in responder mode
+              const rid = currentRoomRef.current;
+              if (rid) {
+                console.log('[START_MONITOR_HANDLER] Publishing renegotiation offer to guardian...');
+                const resp = await fetch(`/api/signaling/${rid}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ offer_signal: offer }),
+                });
+                const json = await resp.json().catch(() => null);
+                console.log('[START_MONITOR_HANDLER] Published renegotiation offer, response', resp.status, json);
+              } else {
+                console.warn('[START_MONITOR_HANDLER] No room ID available to publish offer');
+              }
             } catch (e) {
               console.warn('[START_MONITOR_HANDLER] Failed to create/send renegotiation offer:', e);
             }
