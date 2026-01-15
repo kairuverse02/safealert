@@ -410,6 +410,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
               try {
                 console.log('Guardian PC ontrack event (raw):', ev);
                 console.log('[MIC_TEST] ontrack: track info:', { kind: ev.track?.kind, id: ev.track?.id, label: ev.track?.label });
+                console.log('Guardian PC state at ontrack:', { connectionState: pc.connectionState, iceConnectionState: pc.iceConnectionState, signalingState: pc.signalingState });
                 
                 // Initialize remoteStream if it doesn't exist
                 if (!remoteStreamRef.current) {
@@ -422,6 +423,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                 if (ev.track && !currentRemoteStream.getTracks().find(t => t.id === ev.track.id)) {
                   currentRemoteStream.addTrack(ev.track);
                   console.log('Guardian: added', ev.track.kind, 'track to remoteStream; total tracks:', currentRemoteStream.getTracks().length);
+                  // Log track state
+                  console.log(`Guardian: ${ev.track.kind} track enabled=${ev.track.enabled} readyState=${ev.track.readyState}`);
                 }
 
                 // Log track counts for diagnostics

@@ -275,6 +275,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
             const audioTrack = s.getAudioTracks()[0];
             
             console.log('[START_MONITOR_HANDLER] Adding tracks to peer connection. Video:', !!videoTrack, 'Audio:', !!audioTrack);
+            console.log('[START_MONITOR_HANDLER] PC state - connection:', pc.connectionState, 'ice:', pc.iceConnectionState, 'signing:', pc.signalingState);
             
             if (videoTrack) {
               try {
@@ -293,6 +294,14 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                 console.warn('[START_MONITOR_HANDLER] Failed to add audio track (may already exist):', e);
               }
             }
+            
+            // Check sender states after adding tracks
+            const senders = pc.getSenders();
+            console.log('[START_MONITOR_HANDLER] After addTrack, senders count:', senders.length);
+            senders.forEach((sender, idx) => {
+              const transportState = (sender.transport as RTCDtlsTransport | undefined)?.state || 'unknown';
+              console.log(`[START_MONITOR_HANDLER] Sender ${idx}: track=${sender.track?.kind}, transportState=${transportState}`);
+            });
           } else {
             console.warn('[START_MONITOR_HANDLER] Could not extract RTCPeerConnection from simple-peer');
           }
