@@ -215,6 +215,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
     peer.on("signal", async (offer: unknown) => {
       try {
         console.log('Guardian: signal payload', offer);
+        console.log('[DEBUG] Signal event fired. Payload:', JSON.stringify(offer).substring(0, 200));
+        console.log('[DEBUG] Signal payload type check:', offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] : 'not object');
         // Determine a short descriptor for logging
         let desc = 'signal';
         if (offer && typeof offer === 'object') {
@@ -228,6 +230,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
         const offerSignal = offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] === 'offer' : false;
         const answerSignal = offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] === 'answer' : false;
         const candidateSignal = offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] === 'candidate' : false;
+        console.log('[DEBUG] Signal types - offerSignal:', offerSignal, 'answerSignal:', answerSignal, 'candidateSignal:', candidateSignal);
         
         if (offerSignal) {
           console.log('Guardian: sending offer (persisting to DB)');
@@ -534,6 +537,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
 
           // Handle renegotiation offer from dependent (when monitoring starts after pairing)
           const offer = payload.new.offer_signal;
+          console.log('[REALTIME] Checking offer_signal:', { hasOffer: !!offer, hasPeer: !!peerRef.current, offerType: offer?.type, hasSdp: !!offer?.sdp });
           if (offer && peerRef.current && offer.type === 'offer' && offer.sdp) {
             try {
               console.log('[REALTIME] Received renegotiation offer from dependent during monitoring');
