@@ -1179,6 +1179,29 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           >
             Join
           </button>
+          {process.env.NODE_ENV === 'development' && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const rid = currentRoomRef.current || (manualRoomId && manualRoomId.trim()) || null;
+                  if (!rid) {
+                    console.warn('[DEV] No room id available to force start monitoring');
+                    return;
+                  }
+                  currentRoomRef.current = rid;
+                  try { setCurrentRoomIdState(rid); } catch {}
+                  console.log('[DEV] Forcing start_monitor handler (dev) for room', rid);
+                  await handleStartMonitoringAction();
+                } catch (e) {
+                  console.error('[DEV] Force start failed', e);
+                }
+              }}
+              style={{ marginLeft: 8, padding: '14px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '8px' }}
+            >
+              Force Start Monitor (dev)
+            </button>
+          )}
         </div>
       </div>
     </div>
