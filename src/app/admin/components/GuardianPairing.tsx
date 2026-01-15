@@ -85,7 +85,6 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       console.warn('[GUARDIAN] sendMonitoringRequest: roomId is not set, returning');
       return;
     }
-
     // Show the monitoring UI immediately so guardian can set perimeter / recalibrate even if dependent stream hasn't arrived
     if (start) {
       try { setShowMonitoring(true); } catch (e) { console.warn('[GUARDIAN] failed to set showMonitoring early', e); }
@@ -93,11 +92,12 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
 
     try {
       const action = start ? 'start_monitor' : 'stop_monitor';
-      console.log('[GUARDIAN] Sending monitoring request:', action, 'to room:', roomId);
+      const body = { dependent_action: action };
+      console.log('[GUARDIAN] Sending monitoring request (PATCH body):', body, 'to room:', roomId);
       const resp = await fetch(`/api/signaling/${roomId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dependent_action: action }),
+        body: JSON.stringify(body),
       });
       const json = await resp.json().catch(() => null);
       console.log('[GUARDIAN] Monitoring request response:', { status: resp.status, action, ok: resp.ok, json });
@@ -105,7 +105,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
         console.error('[GUARDIAN] Failed to send monitoring request', json);
         return;
       }
-      console.log('[GUARDIAN] Monitoring request succeeded:', action, json?.data || json);
+      console.log('[GUARDIAN] Monitoring request persisted to DB:', action, json?.data || json);
       setIsMonitoring(start);
     } catch (err) {
       console.error('[GUARDIAN] Failed to send monitoring request (exception)', err);
