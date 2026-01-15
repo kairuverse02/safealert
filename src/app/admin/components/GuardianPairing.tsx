@@ -224,11 +224,12 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
         }
         console.log('Guardian: signal event (desc)', desc);
 
-        // Only persist initial SDP offer to DB to avoid it being overwritten by later candidate-only signals
-        const isOffer = !!(offer && typeof offer === 'object' && (offer as Record<string, unknown>)['type'] === 'offer');
-        if (!isOffer) {
-          console.log('Guardian: skipping DB PATCH for non-offer signal to avoid overwriting offer', desc);
-        } else {
+        // Persist offer, answer, or candidates back to DB
+        const offerSignal = offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] === 'offer' : false;
+        const answerSignal = offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] === 'answer' : false;
+        const candidateSignal = offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] === 'candidate' : false;
+        
+        if (offerSignal) {
           console.log('Guardian: sending offer (persisting to DB)');
           const resp = await fetch(`/api/signaling/${id}`, {
             method: 'PATCH',
@@ -242,87 +243,129 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             return;
           }
           console.log('Offer published to pairing_rooms via API', id, json?.data);
+        } else if (answerSignal) {
+          // Send answer back to dependent (for renegotiation)
+          console.log('Guardian: sending answer to dependent (persisting to DB)');
+          const resp = await fetch(`/api/signaling/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ answer_signal: offer }),
+          });
+          const json = await resp.json().catch(() => null);
+          console.log('Guardian: publish answer response', resp.status, json);
+          if (!resp.ok) {
+            console.error('Failed to publish answer via API', json);
+            return;
+          }
+          console.log('Answer published to pairing_rooms via API', id, json?.data);
+        } else if (candidateSignal) {
+          // Merge candidate into existing answer (avoid overwriting SDP)
+          console.log('Guardian: sending ICE candidate to dependent (merging with existing answer)');
+          try {
+            const resp = await fetch(`/api/signaling/${id}`);
+            const data = await resp.json().catch(() => null);
+            const existingAnswer = data?.data?.answer_signal || {};
+            const candidates = Array.isArray(existingAnswer.candidates) ? existingAnswer.candidates : [];
+            
+            // Add this candidate if not already present
+            const candidateObj = (offer as Record<string, unknown>)?.candidate;
+            if (candidateObj && !candidates.find((c: unknown) => JSON.stringify(c) === JSON.stringify(candidateObj))) {
+              candidates.push(candidateObj);
+            }
+            
+            const updateResp = await fetch(`/api/signaling/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ answer_signal: { ...existingAnswer, candidates } }),
+            });
+            const json = await updateResp.json().catch(() => null);
+            console.log('Guardian: merged candidate response', updateResp.status, json);
+          } catch (err) {
+            console.warn('Guardian: failed to merge candidate', err);
+          }
+        }
 
-          // Start a fallback poll to detect answers in case realtime subscriptions miss the update
-          if (!hasStartedPollingRef.current) {
-            hasStartedPollingRef.current = true;
-            answerPollRef.current = window.setInterval(async () => {
-              try {
-                const resp = await fetch(`/api/signaling/${id}`);
-                const js = await resp.json().catch(() => null);
-                console.log('Guardian: poll for answer response', resp.status, js);
-                if (resp.ok && js?.data?.answer_signal && peerRef.current) {
-                  const ans = js.data.answer_signal;
-                  // Prefer applying only when an SDP string is present to avoid applying empty 'answer' objects
-                  const hasSdp = !!(ans && typeof ans.sdp === 'string' && ans.sdp.length > 0);
-                  if (hasSdp) {
-                    const sdp = ans.sdp as string;
-                    // Only attempt to apply if not already applying or applied
-                    if ((!hasAppliedAnswerRef.current && !applyingAnswerRef.current) || (sdp && lastAppliedAnswerSdpRef.current !== sdp && !applyingAnswerRef.current)) {
-                      applyingAnswerRef.current = true;
+        // Start a fallback poll to detect answers in case realtime subscriptions miss the update
+        // Only for initial offers (not for renegotiation answers/candidates)
+        if (offerSignal && !hasStartedPollingRef.current) {
+          hasStartedPollingRef.current = true;
+          answerPollRef.current = window.setInterval(async () => {
+            try {
+              const resp = await fetch(`/api/signaling/${id}`);
+              const js = await resp.json().catch(() => null);
+              console.log('Guardian: poll for answer response', resp.status, js);
+              if (resp.ok && js?.data?.answer_signal && peerRef.current) {
+                const ans = js.data.answer_signal;
+                // Prefer applying only when an SDP string is present to avoid applying empty 'answer' objects
+                const hasSdp = !!(ans && typeof ans.sdp === 'string' && ans.sdp.length > 0);
+                if (hasSdp) {
+                  const sdp = ans.sdp as string;
+                  // Only attempt to apply if not already applying or applied
+                  if ((!hasAppliedAnswerRef.current && !applyingAnswerRef.current) || (sdp && lastAppliedAnswerSdpRef.current !== sdp && !applyingAnswerRef.current)) {
+                    applyingAnswerRef.current = true;
+                    try {
+                      console.log('Guardian: found answer via poll (sdp present), signaling peer', ans);
+
+                      // If the answer includes a transceiver request for video, attempt to add a recvonly transceiver
                       try {
-                        console.log('Guardian: found answer via poll (sdp present), signaling peer', ans);
-
-                        // If the answer includes a transceiver request for video, attempt to add a recvonly transceiver
-                        try {
-                          const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                          const req = (ans && (ans.transceiverRequest || (Array.isArray(ans.transceiverRequests) ? ans.transceiverRequests[0] : null)));
-                          if (pc && req && (req.kind === 'video' || req.kind === 'audio')) {
-                            console.log('Guardian: answer requests transceiver for', req.kind, ', adding recvonly transceiver on PC');
-                            if (typeof pc.addTransceiver === 'function') {
-                              try {
-                                pc.addTransceiver(req.kind, { direction: 'recvonly' });
-                                console.log(`Guardian: added recvonly ${req.kind} transceiver`);
-                              } catch (e) {
-                                console.warn('Guardian: addTransceiver failed for', req.kind, e);
-                              }
+                        const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+                        const req = (ans && (ans.transceiverRequest || (Array.isArray(ans.transceiverRequests) ? ans.transceiverRequests[0] : null)));
+                        if (pc && req && (req.kind === 'video' || req.kind === 'audio')) {
+                          console.log('Guardian: answer requests transceiver for', req.kind, ', adding recvonly transceiver on PC');
+                          if (typeof pc.addTransceiver === 'function') {
+                            try {
+                              pc.addTransceiver(req.kind, { direction: 'recvonly' });
+                              console.log(`Guardian: added recvonly ${req.kind} transceiver`);
+                            } catch (e) {
+                              console.warn('Guardian: addTransceiver failed for', req.kind, e);
                             }
                           }
-} catch (_e) {
-                  console.warn('Guardian: failed to add recv transceiver', _e);
                         }
-
-                        peerRef.current.signal(ans);
-                        hasAppliedAnswerRef.current = true;
-                        lastAppliedAnswerSdpRef.current = sdp;
-                      } catch (err) {
-                        console.warn('Guardian: failed to apply polled answer', err);
-                      } finally {
-                        applyingAnswerRef.current = false;
+                      } catch (_e) {
+                        console.warn('Guardian: failed to add recv transceiver', _e);
                       }
-                    } else {
-                      console.log('Guardian: polled answer SDP already applied or is being applied, will process candidates only', ans.candidates || ans.candidate);
-                    }
 
-                    // Also apply any candidates included in the update (do not reapply full answer if SDP is same)
-                    const candidates = ans.candidates || ans.candidate ? (ans.candidates || [ans.candidate]) : [];
-                    if (Array.isArray(candidates) && candidates.length > 0) {
-                      (candidates as RTCIceCandidateInit[]).forEach((c) => {
-                        try {
-                          peerRef.current?.signal({ type: 'candidate', candidate: c as unknown as RTCIceCandidate });
-                        } catch (e) {
-                          console.warn('Failed to signal candidate from poll', e);
-                        }
-                      });
-                    }
-
-                    // We can stop polling after we've applied the answer + candidates
-                    if (answerPollRef.current && hasAppliedAnswerRef.current) {
-                      clearInterval(answerPollRef.current);
-                      answerPollRef.current = null;
+                      peerRef.current.signal(ans);
+                      hasAppliedAnswerRef.current = true;
+                      lastAppliedAnswerSdpRef.current = sdp;
+                    } catch (err) {
+                      console.warn('Guardian: failed to apply polled answer', err);
+                    } finally {
+                      applyingAnswerRef.current = false;
                     }
                   } else {
-                    console.log('Guardian: poll found only candidates or transceiver requests (no sdp yet), continuing to poll and will apply once answer SDP appears', ans);
-                    // continue polling
+                    console.log('Guardian: polled answer SDP already applied or is being applied, will process candidates only', ans.candidates || ans.candidate);
                   }
+
+                  // Also apply any candidates included in the update (do not reapply full answer if SDP is same)
+                  const candidates = ans.candidates || ans.candidate ? (ans.candidates || [ans.candidate]) : [];
+                  if (Array.isArray(candidates) && candidates.length > 0) {
+                    (candidates as RTCIceCandidateInit[]).forEach((c) => {
+                      try {
+                        peerRef.current?.signal({ type: 'candidate', candidate: c as unknown as RTCIceCandidate });
+                      } catch (e) {
+                        console.warn('Failed to signal candidate from poll', e);
+                      }
+                    });
+                  }
+
+                  // We can stop polling after we've applied the answer + candidates
+                  if (answerPollRef.current && hasAppliedAnswerRef.current) {
+                    clearInterval(answerPollRef.current);
+                    answerPollRef.current = null;
+                  }
+                } else {
+                  console.log('Guardian: poll found only candidates or transceiver requests (no sdp yet), continuing to poll and will apply once answer SDP appears', ans);
+                  // continue polling
                 }
-              } catch (err) {
-                console.warn('Guardian: poll for answer failed', err);
               }
-            }, 1000);
-          }
-        }      } catch (err) {
-        console.error('Failed to publish offer (exception)', err);
+            } catch (err) {
+              console.warn('Guardian: poll for answer failed', err);
+            }
+          }, 1000);
+        }
+      } catch (err) {
+        console.error('Failed to publish signal (exception)', err);
       }
     });
 
