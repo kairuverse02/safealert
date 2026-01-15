@@ -680,7 +680,6 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               
               // Filter out data channel m-line (typically the 3rd one) to match guardian's offer (which only has video + audio)
               const lines = a.sdp.split('\r\n');
-              const filtered: string[] = [];
               let dataChannelMIndex = -1;
               
               // Find the data channel m-line
@@ -694,25 +693,28 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               
               // If data channel m-line exists, remove it and all associated attributes until the next m-line
               if (dataChannelMIndex >= 0) {
+                const filtered: string[] = [];
+                let nextMIndex = -1;
+                
+                // Find the next m-line after the data channel m-line
+                for (let i = dataChannelMIndex + 1; i < lines.length; i++) {
+                  if (lines[i].startsWith('m=')) {
+                    nextMIndex = i;
+                    break;
+                  }
+                }
+                
+                // Build filtered SDP: include all lines except data channel m-line and its attributes
                 for (let i = 0; i < lines.length; i++) {
-                  // Skip data channel m-line and its attributes
+                  // Skip the data channel m-line itself
                   if (i === dataChannelMIndex) continue;
-                  if (i > dataChannelMIndex && lines[i].startsWith('m=')) {
-                    // Reached next m-line, include this and all following
+                  
+                  // Skip attributes that belong to the data channel m-line (between data m-line and next m-line)
+                  if (i > dataChannelMIndex && (nextMIndex === -1 || i < nextMIndex)) {
+                    // This line is an attribute or content between data m-line and next m-line, skip it
+                    continue;
                   }
-                  if (i > dataChannelMIndex && i < lines.length && lines[i].startsWith('a=')) {
-                    // Skip attributes between data channel m-line and next m-line
-                    let nextMIndex = -1;
-                    for (let j = i; j < lines.length; j++) {
-                      if (lines[j].startsWith('m=')) {
-                        nextMIndex = j;
-                        break;
-                      }
-                    }
-                    if (nextMIndex > 0 && i >= dataChannelMIndex && i < nextMIndex) {
-                      continue; // Skip this attribute
-                    }
-                  }
+                  
                   filtered.push(lines[i]);
                 }
                 
