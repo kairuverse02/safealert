@@ -672,6 +672,12 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
             const type = (typeof a === 'object' && a !== null && 'type' in a && typeof a.type === 'string') ? a.type : 'signal';
             console.log('Patient: signal event, type', type);
 
+            // If this is an answer with SDP, log m-line count
+            if (type === 'answer' && typeof a.sdp === 'string') {
+              const answerMCount = (a.sdp.match(/^m=/gm) || []).length;
+              console.log('Patient: answer SDP m-line count', answerMCount);
+            }
+
             // If this is a candidate-only signal, merge it into the existing answer_signal stored in DB
             if (type === 'candidate') {
               try {
@@ -724,31 +730,6 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
             }
 
             // For final answer or other signals, publish as before
-            // Add m-line count diagnostics for debugging mismatched m-lines with guardian
-            try {
-              const sdp = (a && typeof a.sdp === 'string') ? a.sdp : null;
-              if (sdp) {
-                const answerMCount = (sdp.match(/^m=/gm) || []).length;
-                console.log('Patient: answer m-line count', answerMCount);
-                // also attempt to log offer m-line count if we have it
-                // We can fetch the room to get the offer for comparison
-                try {
-                  const rid = roomId;
-                  if (rid) {
-                    const cur = await fetch(`/api/signaling/${rid}`);
-                    const curJson = await cur.json().catch(() => null);
-                    const offer = curJson?.data?.offer_signal;
-                    const offerS = offer && typeof offer.sdp === 'string' ? offer.sdp : null;
-                    if (offerS) console.log('Patient: offer m-line count', (offerS.match(/^m=/gm) || []).length);
-                  }
-                } catch (e) {
-                  console.warn('Patient: failed to fetch offer for m-line diagnostic', e);
-                }
-              }
-            } catch {
-              /* ignore */
-            }
-
             const resp = await fetch(`/api/signaling/${roomId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
