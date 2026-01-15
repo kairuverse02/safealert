@@ -36,6 +36,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   const currentRoomRef = useRef<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const hasRedirectedRef = useRef<boolean>(false);
+  const isMonitoringActiveDuringPairingRef = useRef<boolean>(false);
   const [perimeterPoints, setPerimeterPoints] = useState<Point[]>([]);
   // If user triggers a mic test while the peer isn't connected yet, queue it and run on connect
   const pendingMicTestRef = useRef<boolean>(false);
@@ -216,6 +217,10 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   // Reusable start_monitor handler so we catch actions that were set before we subscribed
   const handleStartMonitoringAction = useCallback(async () => {
     try {
+      // Mark that monitoring is starting during pairing phase - prevents timeout redirect
+      isMonitoringActiveDuringPairingRef.current = true;
+      console.log('[START_MONITOR_HANDLER] Marking monitoring as active during pairing');
+      
       if (!streamRef.current) {
         console.log('[START_MONITOR_HANDLER] Calling getUserMedia for audio+video (should already be available from pairing)');
         const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -813,15 +818,17 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                 }
               };
 
-              // Fallback: after 8 seconds, if not yet paired, redirect anyway (peer may be functional despite connection state issues)
+              // Fallback: after 8 seconds, if not yet paired AND not monitoring, redirect anyway (peer may be functional despite connection state issues)
               const timeoutId = setTimeout(() => {
-                if (!hasRedirectedRef.current) {
+                if (!hasRedirectedRef.current && !isMonitoringActiveDuringPairingRef.current) {
                   console.log('[PC_TIMEOUT] 8s timeout reached without connection; attempting redirect anyway');
                   try {
                     doRedirectToDashboard();
                   } catch (err) {
                     console.warn('[PC_TIMEOUT] Timeout redirect failed', err);
                   }
+                } else if (isMonitoringActiveDuringPairingRef.current) {
+                  console.log('[PC_TIMEOUT] 8s timeout reached, but monitoring is active - keeping connection alive');
                 }
               }, 8000);
             } else {
