@@ -287,12 +287,9 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
         }
       }
 
-      try {
-        // Redirect dependent to the dashboard so the monitoring UI is shown
-        doRedirectToDashboard(500);
-      } catch (e) {
-        console.warn('Failed to redirect to dashboard on start_monitor', e);
-      }
+      // DO NOT redirect here - monitoring needs to stay connected via the pairing page
+      // The timeout will redirect after 25s if no monitoring command is received
+      console.log('[START_MONITOR_HANDLER] Monitoring prepared; staying on pairing page to maintain connection');
     } catch (err) {
       const error = err as unknown as { message?: string };
       console.error('[START_MONITOR_HANDLER] Error starting media for monitoring:', err);
