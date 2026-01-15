@@ -217,7 +217,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   const handleStartMonitoringAction = useCallback(async () => {
     try {
       if (!streamRef.current) {
-        console.log('[START_MONITOR_HANDLER] Calling getUserMedia for audio+video');
+        console.log('[START_MONITOR_HANDLER] Calling getUserMedia for audio+video (should already be available from pairing)');
         const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         console.log('[START_MONITOR_HANDLER] getUserMedia success. Stream audio tracks:', s.getAudioTracks().length, 'video tracks:', s.getVideoTracks().length);
         streamRef.current = s;
@@ -262,29 +262,8 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           console.log('Dependent: started camera for monitoring');
         }
 
-        if (peerRef.current) {
-          try {
-            console.log('[START_MONITOR_HANDLER] Adding stream to peer connection');
-            const peer = peerRef.current as unknown as { addStream?: (s: MediaStream) => void; _pc?: RTCPeerConnection };
-            if (typeof peer.addStream === 'function') {
-              peer.addStream(s);
-              console.log('[START_MONITOR_HANDLER] Added stream via addStream()');
-            } else {
-              const pc = peer._pc;
-              if (pc) {
-                s.getTracks().forEach(t => {
-                  pc.addTrack(t, s);
-                  console.log('[START_MONITOR_HANDLER] Added track to peer:', t.kind);
-                });
-                try { console.log('[START_MONITOR_HANDLER] RTCPeerConnection senders after add:', pc.getSenders().map(sd => ({ trackId: sd.track?.id, kind: sd.track?.kind }))); } catch (e) { console.warn('[START_MONITOR_HANDLER] Failed to log PC senders', e); }
-              }
-            }
-          } catch (err) {
-            console.error('[START_MONITOR_HANDLER] Failed to add stream to peer', err);
-          }
-        } else {
-          console.warn('[START_MONITOR_HANDLER] peerRef.current is not set, cannot add stream');
-        }
+        // Stream is already in the peer from pairing, so don't add it again
+        console.log('[START_MONITOR_HANDLER] Stream already in peer from initial pairing; skipping addStream');
 
         // Clear the dependent_action from the row so it doesn't retrigger
         try {
@@ -426,8 +405,9 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
     console.log('[REALTIME] Current auth session:', { user: session?.user?.id, authenticated: !!session });
 
     // 1. Get Patient's camera
-    // Note: request audio:false for the initial pairing answer to keep SDP m-line ordering stable
-    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+    // Note: request both video AND audio from the start to avoid renegotiation later
+    // (monitoring will enable audio output after guardian requests it)
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(stream => {
         // Show local preview
         if (myVideoRef.current) {
@@ -438,7 +418,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
         const peer = new Peer({
           initiator: false,
           trickle: true,
-          stream: stream, // Send our camera stream
+          stream: stream, // Send our camera stream (audio+video from the start)
           config: {
             iceServers: [
               { urls: 'stun:stun.l.google.com:19302' }
