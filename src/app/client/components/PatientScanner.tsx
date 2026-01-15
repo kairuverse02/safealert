@@ -672,10 +672,56 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
             const type = (typeof a === 'object' && a !== null && 'type' in a && typeof a.type === 'string') ? a.type : 'signal';
             console.log('Patient: signal event, type', type);
 
-            // If this is an answer with SDP, log m-line count
+            // If this is an answer with SDP, log m-line count and filter data channel
+            let answerToSend = answer;
             if (type === 'answer' && typeof a.sdp === 'string') {
               const answerMCount = (a.sdp.match(/^m=/gm) || []).length;
-              console.log('Patient: answer SDP m-line count', answerMCount);
+              console.log('Patient: answer SDP m-line count BEFORE filtering:', answerMCount);
+              
+              // Filter out data channel m-line (typically the 3rd one) to match guardian's offer (which only has video + audio)
+              const lines = a.sdp.split('\r\n');
+              const filtered: string[] = [];
+              let dataChannelMIndex = -1;
+              
+              // Find the data channel m-line
+              for (let i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith('m=application')) {
+                  dataChannelMIndex = i;
+                  console.log('Patient: found data channel m-line at index', i);
+                  break;
+                }
+              }
+              
+              // If data channel m-line exists, remove it and all associated attributes until the next m-line
+              if (dataChannelMIndex >= 0) {
+                for (let i = 0; i < lines.length; i++) {
+                  // Skip data channel m-line and its attributes
+                  if (i === dataChannelMIndex) continue;
+                  if (i > dataChannelMIndex && lines[i].startsWith('m=')) {
+                    // Reached next m-line, include this and all following
+                  }
+                  if (i > dataChannelMIndex && i < lines.length && lines[i].startsWith('a=')) {
+                    // Skip attributes between data channel m-line and next m-line
+                    let nextMIndex = -1;
+                    for (let j = i; j < lines.length; j++) {
+                      if (lines[j].startsWith('m=')) {
+                        nextMIndex = j;
+                        break;
+                      }
+                    }
+                    if (nextMIndex > 0 && i >= dataChannelMIndex && i < nextMIndex) {
+                      continue; // Skip this attribute
+                    }
+                  }
+                  filtered.push(lines[i]);
+                }
+                
+                const filteredSdp = filtered.join('\r\n');
+                const filteredMCount = (filteredSdp.match(/^m=/gm) || []).length;
+                console.log('Patient: answer SDP m-line count AFTER filtering:', filteredMCount);
+                
+                answerToSend = { ...a, sdp: filteredSdp };
+              }
             }
 
             // If this is a candidate-only signal, merge it into the existing answer_signal stored in DB
@@ -729,11 +775,11 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               return;
             }
 
-            // For final answer or other signals, publish as before
+            // For final answer or other signals, publish the (possibly filtered) answer
             const resp = await fetch(`/api/signaling/${roomId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ answer_signal: answer }),
+              body: JSON.stringify({ answer_signal: answerToSend }),
             });
             const json = await resp.json().catch(() => null);
             console.log('Patient: publish answer response', resp.status, json);
