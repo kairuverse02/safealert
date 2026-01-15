@@ -179,12 +179,25 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
 
     const sourceStream = remoteStream || streamRef.current;
 
-    if (
-      !sourceStream ||
-      !videoRef.current ||
-      !canvasRef.current ||
-      videoRef.current.readyState < videoRef.current.HAVE_METADATA
-    ) {
+    if (!sourceStream) {
+      return;
+    }
+
+    if (!videoRef.current || !canvasRef.current) {
+      return;
+    }
+
+    // Log video state for diagnostics
+    const readyState = videoRef.current.readyState;
+    const videoWidth = videoRef.current.videoWidth;
+    const videoHeight = videoRef.current.videoHeight;
+    
+    if (readyState < videoRef.current.HAVE_METADATA) {
+      if (readyState === videoRef.current.HAVE_NOTHING) {
+        console.log('MonitoringSystem: video readyState is HAVE_NOTHING - no data loaded yet');
+      } else if (readyState === videoRef.current.HAVE_METADATA) {
+        console.log('MonitoringSystem: video readyState is HAVE_METADATA');
+      }
       return;
     }
 
@@ -195,10 +208,12 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     if (!ctx) return;
 
     if (video.videoWidth <= 0 || video.videoHeight <= 0) {
+      console.log('MonitoringSystem: video dimensions invalid', { videoWidth, videoHeight });
       return;
     }
 
     if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+      console.log('MonitoringSystem: resizing canvas to', { videoWidth: video.videoWidth, videoHeight: video.videoHeight });
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
     }
@@ -368,7 +383,11 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     if (videoRef.current) {
       try {
         // Log audio track count for diagnostics
-        try { console.log('MonitoringSystem: remoteStream audio tracks', remoteStream ? remoteStream.getAudioTracks().length : 0); } catch {}
+        try { 
+          const audioTracks = remoteStream ? remoteStream.getAudioTracks().length : 0;
+          const videoTracks = remoteStream ? remoteStream.getVideoTracks().length : 0;
+          console.log('MonitoringSystem: remoteStream has', videoTracks, 'video and', audioTracks, 'audio tracks');
+        } catch {}
 
         // If remoteStream is falsy, clear the srcObject and stop any playback
         if (!remoteStream) {
@@ -382,9 +401,11 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
         // Avoid re-setting the same stream which can trigger load/play interruptions
         if (videoRef.current.srcObject === remoteStream) {
           // already attached
+          console.log('MonitoringSystem: remoteStream already attached, skipping');
           return;
         }
 
+        console.log('MonitoringSystem: setting srcObject to remoteStream and starting playback');
         videoRef.current.srcObject = remoteStream;
         videoRef.current.muted = true;
         // Play may be interrupted if another load occurs; catch and ignore AbortError
@@ -907,6 +928,9 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
             playsInline
             autoPlay
             muted
+            onLoadedMetadata={() => console.log('MonitoringSystem: video onLoadedMetadata fired')}
+            onPlay={() => console.log('MonitoringSystem: video onPlay fired')}
+            onError={(e) => console.error('MonitoringSystem: video onError', e)}
           ></video>
           <canvas
             ref={canvasRef}
