@@ -267,8 +267,38 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           console.log('Dependent: started camera for monitoring');
         }
 
-        // Stream is already in the peer from pairing, so don't add it again
-        console.log('[START_MONITOR_HANDLER] Stream already in peer from initial pairing; skipping addStream');
+        // Add the new stream tracks to the peer connection (replace any empty stream from pairing)
+        if (peerRef.current) {
+          const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+          if (pc) {
+            const videoTrack = s.getVideoTracks()[0];
+            const audioTrack = s.getAudioTracks()[0];
+            
+            console.log('[START_MONITOR_HANDLER] Adding tracks to peer connection. Video:', !!videoTrack, 'Audio:', !!audioTrack);
+            
+            if (videoTrack) {
+              try {
+                pc.addTrack(videoTrack, s);
+                console.log('[START_MONITOR_HANDLER] Added video track to peer connection');
+              } catch (e) {
+                console.warn('[START_MONITOR_HANDLER] Failed to add video track (may already exist):', e);
+              }
+            }
+            
+            if (audioTrack) {
+              try {
+                pc.addTrack(audioTrack, s);
+                console.log('[START_MONITOR_HANDLER] Added audio track to peer connection');
+              } catch (e) {
+                console.warn('[START_MONITOR_HANDLER] Failed to add audio track (may already exist):', e);
+              }
+            }
+          } else {
+            console.warn('[START_MONITOR_HANDLER] Could not extract RTCPeerConnection from simple-peer');
+          }
+        } else {
+          console.warn('[START_MONITOR_HANDLER] No peer available to add tracks');
+        }
 
         // Clear the dependent_action from the row so it doesn't retrigger
         try {
