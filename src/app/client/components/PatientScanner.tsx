@@ -48,9 +48,11 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   const [lastDependentAction, setLastDependentAction] = useState<string | null>(null);
   const [currentRoomIdState, setCurrentRoomIdState] = useState<string | null>(initialRoomId || null);
 
-  // Robust redirect helper: attempt redirect unless already on dashboard, with guarded retries
+  // Robust redirect helper: attempt redirect unless already on dashboard
   const doRedirectToDashboard = useCallback((delay = 0) => {
     try {
+      console.log('[REDIRECT] doRedirectToDashboard called with delay:', delay);
+      
       // If we're already on the dashboard, skip redirect
       const alreadyOnDashboard = typeof window !== 'undefined' && window.location && typeof window.location.pathname === 'string' && window.location.pathname.startsWith('/client/dashboard');
       if (alreadyOnDashboard) {
@@ -58,37 +60,45 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
         return;
       }
 
-      // Track simple attempt counter on window to avoid infinite retries across calls
-      const attemptsKey = '__doRedirectAttempts';
-      const w = typeof window !== 'undefined' ? (window as unknown as Record<string, unknown>) : undefined;
-      const attempts = (w && typeof w[attemptsKey] === 'number') ? (w[attemptsKey] as number) : 0;
-      if (attempts >= 3) {
-        console.warn('[REDIRECT] Max redirect attempts reached; aborting');
-        return;
-      }
-      if (typeof window !== 'undefined') (window as unknown as Record<string, number>)[attemptsKey] = attempts + 1;
+      console.log('[REDIRECT] Scheduling redirect in', delay, 'ms. Router available?', !!router);
 
-      // Try router.push first, fallback to location.href. We still set hasRedirectedRef after scheduling.
-      if (router && typeof (router as unknown as { push?: (url: string) => unknown }).push === 'function') {
-        setTimeout(() => {
-          try {
+      // Try router.push first, fallback to location.href
+      const performRedirect = () => {
+        try {
+          console.log('[REDIRECT] Attempting router.push to /client/dashboard');
+          if (router && typeof (router as unknown as { push?: (url: string) => unknown }).push === 'function') {
             (router as unknown as { push?: (url: string) => void }).push?.('/client/dashboard');
-          } catch (e) {
-            console.warn('[REDIRECT] router.push failed, falling back to location.href', e);
-            try { window.location.href = '/client/dashboard'; } catch (err) { console.warn('[REDIRECT] fallback failed', err); }
+            console.log('[REDIRECT] router.push completed');
+          } else {
+            throw new Error('Router not available');
           }
-        }, delay);
+        } catch (e) {
+          console.warn('[REDIRECT] router.push failed, falling back to location.href', e);
+          try {
+            console.log('[REDIRECT] Setting window.location.href to /client/dashboard');
+            window.location.href = '/client/dashboard';
+          } catch (err) {
+            console.warn('[REDIRECT] location.href redirect failed', err);
+          }
+        }
+      };
+
+      if (delay > 0) {
+        setTimeout(performRedirect, delay);
       } else {
-        setTimeout(() => {
-          try { window.location.href = '/client/dashboard'; } catch (err) { console.warn('[REDIRECT] location.href redirect failed', err); }
-        }, delay);
+        performRedirect();
       }
 
       // mark that we've attempted at least one redirect
       hasRedirectedRef.current = true;
     } catch (err) {
       console.warn('[REDIRECT] unexpected error while redirecting', err);
-      try { window.location.href = '/client/dashboard'; } catch (err2) { console.warn('[REDIRECT] fallback failed again', err2); }
+      try {
+        console.log('[REDIRECT] Emergency fallback to window.location.href');
+        window.location.href = '/client/dashboard';
+      } catch (err2) {
+        console.warn('[REDIRECT] fallback failed again', err2);
+      }
     }
   }, [router]);
 
@@ -783,13 +793,17 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           const tryAttach = () => {
             const pc = (p as unknown as { _pc?: RTCPeerConnection })?._pc;
             if (pc) {
-              pc.oniceconnectionstatechange = () => console.log('Patient PC ICE state:', pc.iceConnectionState);
+              console.log('[PC_ATTACH] RTCPeerConnection available, attaching handlers');
+              pc.oniceconnectionstatechange = () => {
+                const iceState = pc.iceConnectionState;
+                console.log('[PC_ICE] Patient PC ICE state changed:', iceState);
+              };
               pc.onconnectionstatechange = () => {
                 const connState = pc.connectionState || pc.iceConnectionState;
-                console.log('Patient PC connection state:', connState);
+                console.log('[PC_CONN] Patient PC connection state changed:', connState);
                 // If the underlying RTCPeerConnection reports connected, treat it as paired
                 if (connState === 'connected') {
-                  console.log('RTCPeerConnection connected — updating UI and redirecting');
+                  console.log('[PC_CONN] RTCPeerConnection CONNECTED — updating UI and redirecting');
                   setIsPairing(false);
                   setIsPaired(true);
 
@@ -816,18 +830,22 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
 
                   try {
                     if (!hasRedirectedRef.current) {
+                      console.log('[PC_CONN] hasRedirectedRef is false, calling doRedirectToDashboard');
                       doRedirectToDashboard();
+                    } else {
+                      console.log('[PC_CONN] hasRedirectedRef is already true, skipping redirect');
                     }
                   } catch (err) {
                     console.warn('Router push failed', err);
                   }
                 } else if (connState === 'failed') {
-                  console.warn('RTCPeerConnection entered failed state');
+                  console.warn('[PC_CONN] RTCPeerConnection entered failed state');
                   setIsPairing(false);
                   setIsPaired(false);
                 }
               };
             } else {
+              console.log('[PC_ATTACH] RTCPeerConnection not yet available, retrying in 200ms');
               setTimeout(tryAttach, 200);
             }
           };
@@ -862,8 +880,8 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
 
         // 5. Connection is established
         peer.on('connect', () => {
-          console.log('Patient: peer.connect event');
-          console.log('CONNECTED!');
+          console.log('[PEER_CONNECT] Patient: peer.connect event fired');
+          console.log('[PEER_CONNECT] CONNECTED!');
           setIsPairing(false);
           setIsPaired(true);
 
@@ -879,6 +897,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           }
 
           try {
+            console.log('[PEER_CONNECT] About to redirect to dashboard');
             doRedirectToDashboard();
           } catch (err) {
             console.warn('Router push failed', err);
