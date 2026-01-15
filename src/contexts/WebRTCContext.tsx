@@ -452,13 +452,29 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
     }
   }, [isPairing, isPaired, startMonitoring, stopMonitoring, supabase]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount ONLY (no dependencies to avoid re-running)
   useEffect(() => {
     return () => {
       console.log('[WebRTCContext] Provider unmounting, cleaning up...');
-      destroyConnection();
+      
+      // Inline cleanup to avoid dependency issues
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (channelRef.current) {
+        try {
+          channelRef.current.unsubscribe();
+        } catch (e) {
+          console.warn('[WebRTCContext] Failed to unsubscribe', e);
+        }
+      }
+      if (peerRef.current) {
+        try {
+          peerRef.current.destroy();
+        } catch (e) {
+          console.warn('[WebRTCContext] Failed to destroy peer', e);
+        }
+      }
     };
-  }, [destroyConnection]);
+  }, []); // Empty array - only run on actual unmount
 
   const value: WebRTCContextValue = {
     peer: peerRef.current,
