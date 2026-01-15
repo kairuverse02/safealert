@@ -649,8 +649,17 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           }
         }
       )
+      .on('system', (msg: Record<string, unknown>) => {
+        console.log('[REALTIME] System message:', msg);
+      })
+      .on('postgres_changes', (payload: Record<string, unknown>) => {
+        console.log('[REALTIME] postgres_changes received:', payload);
+      })
       .subscribe((status: string) => {
         console.log('[REALTIME] Subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('[REALTIME] Subscription callback - now listening for real updates');
+        }
       });
 
     peer.on("connect", () => {
