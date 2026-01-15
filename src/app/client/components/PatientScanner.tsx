@@ -818,19 +818,20 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                 }
               };
 
-              // Fallback: after 8 seconds, if not yet paired AND not monitoring, redirect anyway (peer may be functional despite connection state issues)
+              // Fallback: after 25 seconds, if not yet paired AND not monitoring, redirect anyway
+              // (increased from 8s to allow polling time to detect start_monitor command before timeout)
               const timeoutId = setTimeout(() => {
                 if (!hasRedirectedRef.current && !isMonitoringActiveDuringPairingRef.current) {
-                  console.log('[PC_TIMEOUT] 8s timeout reached without connection; attempting redirect anyway');
+                  console.log('[PC_TIMEOUT] 25s timeout reached without connection; attempting redirect anyway');
                   try {
                     doRedirectToDashboard();
                   } catch (err) {
                     console.warn('[PC_TIMEOUT] Timeout redirect failed', err);
                   }
                 } else if (isMonitoringActiveDuringPairingRef.current) {
-                  console.log('[PC_TIMEOUT] 8s timeout reached, but monitoring is active - keeping connection alive');
+                  console.log('[PC_TIMEOUT] 25s timeout reached, but monitoring is active - keeping connection alive');
                 }
-              }, 8000);
+              }, 25000);
             } else {
               console.log('[PC_ATTACH] RTCPeerConnection not yet available, retrying in 200ms');
               setTimeout(tryAttach, 200);
