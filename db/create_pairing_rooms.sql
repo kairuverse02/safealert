@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS public.pairing_rooms (
   answer_signal jsonb,
   perimeter_json text,
   dependent_action text,
+  guardian_command text,
   guardian_event jsonb,
   created_at timestamptz DEFAULT now()
 );
