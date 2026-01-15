@@ -513,6 +513,10 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           filter: `id=eq.${id}`,
         },
         (payload: { new: { offer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; answer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; guardian_event?: { type?: string; [key: string]: unknown } | null } }) => {
+          // LOG EVERY UPDATE EVENT RECEIVED
+          console.log('[REALTIME] UPDATE event received from database. Payload keys:', Object.keys(payload.new || {}));
+          console.log('[REALTIME] Full payload:', JSON.stringify(payload.new).substring(0, 300));
+          
           // Detect guardian_event messages published by the dependent (e.g., mic test start, mic unavailable, permission denied)
           try {
             const ge = payload.new.guardian_event;
@@ -645,7 +649,9 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           }
         }
       )
-      .subscribe();
+      .subscribe((status: string) => {
+        console.log('[REALTIME] Subscription status:', status);
+      });
 
     peer.on("connect", () => {
       console.log("Guardian connected to patient");
