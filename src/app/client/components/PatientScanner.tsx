@@ -323,6 +323,50 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
     }
   }, [doRedirectToDashboard]);
 
+  // Poll helpers defined at component scope so they can be accessed in cleanup
+  const pollRef = useRef<{ id: number | null }>({ id: null });
+  const startPollingForActions = useCallback((room: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      if (pollRef.current?.id) return; // already polling
+      console.log('[POLL] Starting fallback poll for dependent_action');
+      pollRef.current.id = window.setInterval(async () => {
+        try {
+          const r = await fetch(`/api/signaling/${room}`);
+          const j = await r.json().catch(() => null);
+          const dep = j?.data?.dependent_action;
+          if (dep) {
+            console.log('[POLL] Found dependent_action via poll', dep);
+            try { setLastDependentAction(dep); } catch (e) { console.warn('[POLL] failed to set lastDependentAction', e); }
+            if (dep === 'start_monitor') {
+              try {
+                await handleStartMonitoringAction();
+              } catch (err) {
+                console.warn('[POLL] start_monitor handler failed', err);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[POLL] poll failed', e);
+        }
+      }, 2000);
+    } catch (e) {
+      console.warn('[POLL] startPollingForActions error', e);
+    }
+  }, [handleStartMonitoringAction]);
+
+  const stopPollingForActions = useCallback(() => {
+    try {
+      if (pollRef.current?.id) {
+        clearInterval(pollRef.current.id);
+        pollRef.current.id = null;
+        console.log('[POLL] Stopped fallback poll');
+      }
+    } catch (e) {
+      console.warn('[POLL] stopPollingForActions error', e);
+    }
+  }, []);
+
   // This is the main pairing function, called by scan or manual input
   const pairDevice = useCallback(async (roomId: string) => {
     if (isPairing || isPaired) return;
@@ -412,49 +456,6 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           channelRetryRef.current = 0; // reset retry counter
         }
         
-        // Add a short-poll fallback in case realtime events are missed (e.g., cross-device or mobile edge cases)
-        const pollRef = { id: null as number | null };
-        const startPollingForActions = (room: string) => {
-          try {
-            if (typeof window === 'undefined') return;
-            if (pollRef.id) return; // already polling
-            console.log('[POLL] Starting fallback poll for dependent_action');
-            pollRef.id = window.setInterval(async () => {
-              try {
-                const r = await fetch(`/api/signaling/${room}`);
-                const j = await r.json().catch(() => null);
-                const dep = j?.data?.dependent_action;
-                if (dep) {
-                  console.log('[POLL] Found dependent_action via poll', dep);
-                  try { setLastDependentAction(dep); } catch (e) { console.warn('[POLL] failed to set lastDependentAction', e); }
-                  if (dep === 'start_monitor') {
-                    try {
-                      await handleStartMonitoringAction();
-                    } catch (err) {
-                      console.warn('[POLL] start_monitor handler failed', err);
-                    }
-                  }
-                }
-              } catch (e) {
-                console.warn('[POLL] poll failed', e);
-              }
-            }, 2000);
-          } catch (e) {
-            console.warn('[POLL] startPollingForActions error', e);
-          }
-        };
-        const stopPollingForActions = () => {
-          try {
-            if (pollRef.id) {
-              clearInterval(pollRef.id);
-              pollRef.id = null;
-              console.log('[POLL] Stopped fallback poll');
-            }
-          } catch (e) {
-            console.warn('[POLL] stopPollingForActions error', e);
-          }
-        };
-
         channelRef.current = supabase
           .channel(`room-${roomId}`) 
           .on(
@@ -547,13 +548,13 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           .subscribe((status: string) => {
             console.log('[REALTIME] Subscription status:', status);
             console.log('[REALTIME] Supabase channels active:', supabase.getChannels().length);
-            if (status === 'CHANNEL_ERROR') {
-              console.error('[REALTIME] CHANNEL_ERROR - subscription failed. Check RLS policies on pairing_rooms table');
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              console.error('[REALTIME] CHANNEL_ERROR or TIMED_OUT - subscription failed. Check RLS policies on pairing_rooms table');
               console.error('[REALTIME] Channel state:', channelRef.current?.state);
               const retries = channelRetryRef.current || 0;
               if (retries < MAX_CHANNEL_RETRIES) {
                 channelRetryRef.current = retries + 1;
-                console.log(`[REALTIME] Retrying subscription (${channelRetryRef.current}/${MAX_CHANNEL_RETRIES}) in 1000ms`);
+                console.log(`[REALTIME] Retrying subscription (${channelRetryRef.current}/${MAX_CHANNEL_RETRIES}) in 2000ms`);
                 setTimeout(() => {
                   try {
                     if (channelRef.current) {
@@ -567,9 +568,9 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                   } catch (e) {
                     console.warn('[REALTIME] Retry subscribe attempt failed', e);
                   }
-                }, 1000);
+                }, 2000);
               } else {
-                console.error('[REALTIME] Subscription retry limit reached');
+                console.error('[REALTIME] Subscription retry limit reached - poll will keep trying as fallback');
               }
             } else if (status === 'SUBSCRIBED') {
               console.log('[REALTIME] Successfully subscribed to realtime updates');
@@ -582,8 +583,8 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               } catch (e) { console.warn('[POLL] failed to start after subscribe', e); }
 
             } else if (status === 'CLOSED') {
-              console.warn('[REALTIME] Subscription closed');
-              try { stopPollingForActions(); } catch (e) { console.warn('[POLL] failed stop on close', e); }
+              console.warn('[REALTIME] Subscription closed - poll continues as fallback');
+              // DON'T stop poll here - let it keep running as the primary fallback if realtime fails
             }
           });
 
@@ -935,6 +936,8 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
       }
       channelRef.current?.unsubscribe();
       peerRef.current?.destroy();
+      // Stop poll on cleanup
+      try { stopPollingForActions(); } catch (e) { console.warn('[POLL] failed to stop on cleanup', e); }
 
       try {
         if (typeof window !== 'undefined') {
