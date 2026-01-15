@@ -124,42 +124,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
   const supabase = useMemo(() => createClient(), []);
   const { initAudio, playSound } = useAudio(isMuted);
 
-  // If a dependent triggers an action while guardian UI is not showing monitoring,
-  // auto-open monitoring and audibly notify the guardian (best-effort).
-  useEffect(() => {
-    if (!roomId) return;
-    const channel = supabase
-      .channel(`room-action-${roomId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'pairing_rooms', filter: `id=eq.${roomId}` },
-        (payload: { new: { dependent_action?: string } }) => {
-          try {
-            const dep = payload.new.dependent_action;
-            console.log('GuardianPairing: received dependent_action', dep);
-            if (dep) {
-              try { setShowMonitoring(true); } catch {}
-
-              (async () => {
-                try {
-                  await initAudio();
-                  if (dep === 'sos') playSound('sos');
-                  else if (dep === 'bathroom') playSound('bathroom');
-                  else playSound('sound');
-                } catch (e) {
-                  console.warn('GuardianPairing: failed to play notification sound', e);
-                }
-              })();
-            }
-          } catch (e) {
-            console.warn('GuardianPairing: failed processing dependent_action realtime', e);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => { try { channel.unsubscribe(); } catch {} };
-  }, [roomId, supabase, initAudio, playSound]);
+  // NOTE: dependent_action handling moved to main channel subscription below to avoid CHANNEL_ERROR
+  // (Supabase doesn't allow multiple subscriptions to same row with same filter)
 
   const createRoom = async () => {
     if (isWaiting) return;
@@ -512,11 +478,33 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           table: "pairing_rooms",
           filter: `id=eq.${id}`,
         },
-        (payload: { new: { offer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; answer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; guardian_event?: { type?: string; [key: string]: unknown } | null } }) => {
+        (payload: { new: { offer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; answer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; guardian_event?: { type?: string; [key: string]: unknown } | null; dependent_action?: string } }) => {
           // LOG EVERY UPDATE EVENT RECEIVED
           console.log('[REALTIME] UPDATE event received from database. Payload keys:', Object.keys(payload.new || {}));
           console.log('[REALTIME] Full payload:', JSON.stringify(payload.new).substring(0, 300));
           
+          // Handle dependent_action (consolidated from separate channel to avoid CHANNEL_ERROR)
+          try {
+            const dep = payload.new.dependent_action;
+            if (dep) {
+              console.log('GuardianPairing: received dependent_action', dep);
+              try { setShowMonitoring(true); } catch {}
+
+              (async () => {
+                try {
+                  await initAudio();
+                  if (dep === 'sos') playSound('sos');
+                  else if (dep === 'bathroom') playSound('bathroom');
+                  else playSound('sound');
+                } catch (e) {
+                  console.warn('GuardianPairing: failed to play notification sound', e);
+                }
+              })();
+            }
+          } catch (e) {
+            console.warn('GuardianPairing: failed processing dependent_action realtime', e);
+          }
+
           // Detect guardian_event messages published by the dependent (e.g., mic test start, mic unavailable, permission denied)
           try {
             const ge = payload.new.guardian_event;
