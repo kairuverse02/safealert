@@ -419,6 +419,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           initiator: false,
           trickle: true,
           stream: stream, // Send our camera stream (audio+video from the start)
+          channelConfig: { ordered: false },
           config: {
             iceServers: [
               { urls: 'stun:stun.l.google.com:19302' }
@@ -672,58 +673,13 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
             const type = (typeof a === 'object' && a !== null && 'type' in a && typeof a.type === 'string') ? a.type : 'signal';
             console.log('Patient: signal event, type', type);
 
-            // If this is an answer with SDP, log m-line count and filter data channel
-            let answerToSend = answer;
+            // If this is an answer with SDP, log m-line count
+            const answerToSend = answer;
             if (type === 'answer' && typeof a.sdp === 'string') {
               const answerMCount = (a.sdp.match(/^m=/gm) || []).length;
-              console.log('Patient: answer SDP m-line count BEFORE filtering:', answerMCount);
-              
-              // Filter out data channel m-line (typically the 3rd one) to match guardian's offer (which only has video + audio)
-              const lines = a.sdp.split('\r\n');
-              let dataChannelMIndex = -1;
-              
-              // Find the data channel m-line
-              for (let i = 0; i < lines.length; i++) {
-                if (lines[i].startsWith('m=application')) {
-                  dataChannelMIndex = i;
-                  console.log('Patient: found data channel m-line at index', i);
-                  break;
-                }
-              }
-              
-              // If data channel m-line exists, remove it and all associated attributes until the next m-line
-              if (dataChannelMIndex >= 0) {
-                const filtered: string[] = [];
-                let nextMIndex = -1;
-                
-                // Find the next m-line after the data channel m-line
-                for (let i = dataChannelMIndex + 1; i < lines.length; i++) {
-                  if (lines[i].startsWith('m=')) {
-                    nextMIndex = i;
-                    break;
-                  }
-                }
-                
-                // Build filtered SDP: include all lines except data channel m-line and its attributes
-                for (let i = 0; i < lines.length; i++) {
-                  // Skip the data channel m-line itself
-                  if (i === dataChannelMIndex) continue;
-                  
-                  // Skip attributes that belong to the data channel m-line (between data m-line and next m-line)
-                  if (i > dataChannelMIndex && (nextMIndex === -1 || i < nextMIndex)) {
-                    // This line is an attribute or content between data m-line and next m-line, skip it
-                    continue;
-                  }
-                  
-                  filtered.push(lines[i]);
-                }
-                
-                const filteredSdp = filtered.join('\r\n');
-                const filteredMCount = (filteredSdp.match(/^m=/gm) || []).length;
-                console.log('Patient: answer SDP m-line count AFTER filtering:', filteredMCount);
-                
-                answerToSend = { ...a, sdp: filteredSdp };
-              }
+              console.log('Patient: answer SDP m-line count:', answerMCount);
+              // Don't filter SDP - let guardian handle it
+              // The issue was that filtering was corrupting the SDP structure
             }
 
             // If this is a candidate-only signal, merge it into the existing answer_signal stored in DB

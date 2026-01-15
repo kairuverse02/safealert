@@ -378,10 +378,11 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           try {
             if (!localCameraActive && typeof pc.addTransceiver === 'function' && !hasAddedRecvTransceiverRef.current) {
               try {
-                // Add both video and audio recvonly transceivers so the dependent can send audio later when monitoring starts
+                // Add video, audio, and data channel recvonly transceivers to match dependent's offer structure
                 pc.addTransceiver('video', { direction: 'recvonly' });
                 pc.addTransceiver('audio', { direction: 'recvonly' });
-                console.log('Guardian: proactively added recvonly video and audio transceivers at attach');
+                pc.addTransceiver('application', { direction: 'recvonly' });
+                console.log('Guardian: proactively added recvonly video, audio, and data channel transceivers at attach');
                 hasAddedRecvTransceiverRef.current = true;
                 try { console.log('Guardian PC transceivers after proactive add:', pc.getTransceivers ? pc.getTransceivers() : []); } catch {}
               } catch (e) {
