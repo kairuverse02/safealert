@@ -335,15 +335,49 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           const r = await fetch(`/api/signaling/${room}`);
           const j = await r.json().catch(() => null);
           const dep = j?.data?.dependent_action;
-          if (dep) {
-            console.log('[POLL] Found dependent_action via poll', dep);
-            try { setLastDependentAction(dep); } catch (e) { console.warn('[POLL] failed to set lastDependentAction', e); }
-            if (dep === 'start_monitor') {
+          const gcmd = j?.data?.guardian_command;
+          if (dep || gcmd) {
+            console.log('[POLL] Found action via poll', { dependent_action: dep, guardian_command: gcmd });
+            try { if (dep) setLastDependentAction(dep); else if (gcmd) setLastDependentAction(gcmd); } catch (e) { console.warn('[POLL] failed to set lastDependentAction', e); }
+
+            // Handle guardian_command (preferred) or dependent_action
+            const cmd = gcmd || dep;
+            if (cmd === 'start_monitor') {
               try {
                 await handleStartMonitoringAction();
               } catch (err) {
                 console.warn('[POLL] start_monitor handler failed', err);
               }
+
+              // If this was a guardian_command, clear it so guardian doesn't keep it set
+              if (gcmd) {
+                try {
+                  const rid = room;
+                  if (rid) {
+                    const clearResp = await fetch(`/api/signaling/${rid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guardian_command: null }) });
+                    const clearJson = await clearResp.json().catch(() => null);
+                    console.log('[POLL] Cleared guardian_command after handling', clearResp.status, clearJson);
+                  }
+                } catch (err) { console.warn('[POLL] failed to clear guardian_command', err); }
+              }
+            }
+            if (cmd === 'stop_monitor') {
+              try {
+                if (streamRef.current) {
+                  streamRef.current.getTracks().forEach(t => t.stop());
+                  streamRef.current = null;
+                  setIsMonitoringActive(false);
+                  console.log('Dependent: stopped camera monitoring (via poll)');
+                }
+                if (gcmd) {
+                  const rid = room;
+                  if (rid) {
+                    const clearResp = await fetch(`/api/signaling/${rid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guardian_command: null }) });
+                    const clearJson = await clearResp.json().catch(() => null);
+                    console.log('[POLL] Cleared guardian_command after stop_monitor', clearResp.status, clearJson);
+                  }
+                }
+              } catch (err) { console.warn('[POLL] stop_monitor handling failed', err); }
             }
           }
         } catch (e) {
@@ -466,18 +500,18 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               table: 'pairing_rooms',
               filter: `id=eq.${roomId}`,
             },
-            (payload: { new: { offer_signal?: unknown; perimeter_json?: string; dependent_action?: string } }) => {
+            (payload: { new: { offer_signal?: unknown; perimeter_json?: string; dependent_action?: string; guardian_command?: string } }) => {
               const offer = payload.new.offer_signal;
               const depAction = payload.new.dependent_action;
+              const guardianCmd = (payload.new as { guardian_command?: string }).guardian_command;
 
               // Always log full payload for debugging cross-device update issues
-              console.log('[REALTIME] Dependent received payload update. depAction:', depAction, 'payload:', payload.new);
+              console.log('[REALTIME] Dependent received payload update. depAction:', depAction, 'guardianCmd:', guardianCmd, 'payload:', payload.new);
 
               // Update debug state so the UI shows the last action (helps confirm same room)
               try {
-                if (depAction) {
-                  setLastDependentAction(depAction);
-                }
+                if (depAction) setLastDependentAction(depAction);
+                else if (guardianCmd) setLastDependentAction(guardianCmd);
               } catch (e) { console.warn('[REALTIME] failed to set lastDependentAction', e); }
 
               // Handle offer signaling
@@ -486,8 +520,9 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                 peerRef.current.signal(offer as Peer.SignalData | string);
               }
 
-              // Handle guardian requested monitoring actions
-              if (depAction === 'start_monitor') {
+              // Handle guardian requested monitoring actions (support guardian_command or dependent_action)
+              const cmd = depAction || guardianCmd;
+              if (cmd === 'start_monitor') {
                 console.log('[START_MONITOR] Guardian requested monitoring. streamRef.current exists?', !!streamRef.current);
                 // Delegate to shared handler
                 (async () => {
@@ -497,7 +532,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                     console.error('[START_MONITOR] handler failed', err);
                   }
                 })();
-              } else if (depAction === 'stop_monitor') {
+              } else if (cmd === 'stop_monitor') {
                 if (streamRef.current) {
                   streamRef.current.getTracks().forEach(t => t.stop());
                   streamRef.current = null;
@@ -509,7 +544,9 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                     try {
                       const rid = currentRoomRef.current;
                       if (rid) {
-                        const clearResp = await fetch(`/api/signaling/${rid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dependent_action: null }) });
+                        // clear whichever command field triggered this (prefer guardian_command)
+                        const clearBody = guardianCmd ? { guardian_command: null } : { dependent_action: null };
+                        const clearResp = await fetch(`/api/signaling/${rid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(clearBody) });
                         const clearJson = await clearResp.json().catch(() => null);
                         console.log('Cleared dependent_action response', clearResp.status, clearJson);
                       }
@@ -601,12 +638,26 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                 peerRef.current.signal(json.data.offer_signal);
               }
 
-              // If guardian already requested monitoring before we subscribed, handle it now
-              if (json?.data?.dependent_action === 'start_monitor') {
-                console.log('[INIT_FETCH] Found dependent_action=start_monitor in initial fetch, handling it');
+              // If guardian already requested monitoring before we subscribed, handle it now (support guardian_command)
+              const initialDep = json?.data?.dependent_action;
+              const initialGcmd = json?.data?.guardian_command;
+              if (initialDep === 'start_monitor' || initialGcmd === 'start_monitor') {
+                console.log('[INIT_FETCH] Found start_monitor in initial fetch (dep or guardian_command), handling it');
                 try {
-                  try { setLastDependentAction('start_monitor'); } catch {}
+                  try { setLastDependentAction(initialDep || initialGcmd || 'start_monitor'); } catch {}
                   await handleStartMonitoringAction();
+
+                  // If it was guardian_command, clear it now
+                  if (initialGcmd) {
+                    try {
+                      const rid = roomId;
+                      if (rid) {
+                        const clearResp = await fetch(`/api/signaling/${rid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guardian_command: null }) });
+                        const clearJson = await clearResp.json().catch(() => null);
+                        console.log('[INIT_FETCH] Cleared guardian_command after handling', clearResp.status, clearJson);
+                      }
+                    } catch (err) { console.warn('[INIT_FETCH] failed to clear guardian_command', err); }
+                  }
                 } catch (err) {
                   console.warn('[INIT_FETCH] start_monitor handler failed', err);
                 }

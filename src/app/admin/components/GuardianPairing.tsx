@@ -92,7 +92,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
 
     try {
       const action = start ? 'start_monitor' : 'stop_monitor';
-      const body = { dependent_action: action };
+      const body = { guardian_command: action };
       console.log('[GUARDIAN] Sending monitoring request (PATCH body):', body, 'to room:', roomId);
       const resp = await fetch(`/api/signaling/${roomId}`, {
         method: 'PATCH',
