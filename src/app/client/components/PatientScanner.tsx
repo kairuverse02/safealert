@@ -330,6 +330,23 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               const transportState = (sender.transport as RTCDtlsTransport | undefined)?.state || 'unknown';
               console.log(`[START_MONITOR_HANDLER] Sender ${idx}: track=${sender.track?.kind}, transportState=${transportState}`);
             });
+            
+            // CRITICAL: Force renegotiation by creating an offer
+            // When in responder mode (dependent), simple-peer needs an explicit offer to trigger renegotiation
+            console.log('[START_MONITOR_HANDLER] Forcing renegotiation: creating offer to send to initiator...');
+            try {
+              const offer = await pc.createOffer({ iceRestart: false });
+              console.log('[START_MONITOR_HANDLER] Created offer for renegotiation, offer type:', offer.type);
+              
+              await pc.setLocalDescription(offer);
+              console.log('[START_MONITOR_HANDLER] Set local description with new offer');
+              
+              // Send the offer via simple-peer signal event (will be caught by our signal handler)
+              // simple-peer will emit this as a 'signal' event with the offer
+              console.log('[START_MONITOR_HANDLER] Offer will be sent to guardian via realtime...');
+            } catch (e) {
+              console.warn('[START_MONITOR_HANDLER] Failed to create/send renegotiation offer:', e);
+            }
           } else {
             console.warn('[START_MONITOR_HANDLER] Could not extract RTCPeerConnection from simple-peer');
           }
