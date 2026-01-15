@@ -590,8 +590,9 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               table: 'pairing_rooms',
               filter: `id=eq.${roomId}`,
             },
-            (payload: { new: { offer_signal?: unknown; perimeter_json?: string; dependent_action?: string; guardian_command?: string } }) => {
+            (payload: { new: { offer_signal?: unknown; answer_signal?: unknown; perimeter_json?: string; dependent_action?: string; guardian_command?: string } }) => {
               const offer = payload.new.offer_signal;
+              const answer = payload.new.answer_signal;
               const depAction = payload.new.dependent_action;
               const guardianCmd = (payload.new as { guardian_command?: string }).guardian_command;
 
@@ -604,10 +605,32 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
                 else if (guardianCmd) setLastDependentAction(guardianCmd);
               } catch (e) { console.warn('[REALTIME] failed to set lastDependentAction', e); }
 
-              // Handle offer signaling
+              // Handle offer signaling from guardian (renegotiation response to our new tracks)
               if (offer && peerRef.current) {
                 console.log('Received offer!');
                 peerRef.current.signal(offer as Peer.SignalData | string);
+              }
+
+              // Handle answer signaling from guardian (response to renegotiation or initial pairing)
+              if (answer && peerRef.current && typeof answer === 'object' && (answer as Record<string, unknown>).type === 'answer') {
+                console.log('[REALTIME] Received answer from guardian, signaling peer');
+                peerRef.current.signal(answer as Peer.SignalData | string);
+              }
+
+              // Handle ICE candidates from guardian
+              const candidates = (payload.new as { candidates?: unknown[] }).candidates;
+              if (candidates && Array.isArray(candidates) && peerRef.current) {
+                console.log('[REALTIME] Received', candidates.length, 'candidates from guardian');
+                for (const cand of candidates) {
+                  if (cand && typeof cand === 'object') {
+                    try {
+                      // simple-peer handles candidates via signal() method as well
+                      peerRef.current.signal(cand as Peer.SignalData | string);
+                    } catch (e) {
+                      console.warn('[REALTIME] Failed to add candidate', e);
+                    }
+                  }
+                }
               }
 
               // Handle guardian requested monitoring actions (support guardian_command or dependent_action)
@@ -715,7 +738,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
             }
           });
 
-        // After subscribing, fetch the current room state in case the guardian already published the offer
+        // After subscribing, fetch the current room state in case the guardian already published the offer or answer
         (async () => {
           try {
             const resp = await fetch(`/api/signaling/${roomId}`);
@@ -726,6 +749,27 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
               if (json?.data?.offer_signal && peerRef.current) {
                 console.log('Fetched existing offer from room state, signaling peer');
                 peerRef.current.signal(json.data.offer_signal);
+              }
+
+              // Also check for answer from guardian (in case it was already published before we subscribed)
+              if (json?.data?.answer_signal && peerRef.current && typeof json.data.answer_signal === 'object' && (json.data.answer_signal as Record<string, unknown>).type === 'answer') {
+                console.log('[INIT_FETCH] Found answer in room state, signaling peer');
+                peerRef.current.signal(json.data.answer_signal as Peer.SignalData | string);
+              }
+
+              // If there are candidates, apply them
+              if (json?.data?.candidates && Array.isArray(json.data.candidates) && peerRef.current) {
+                console.log('[INIT_FETCH] Found', json.data.candidates.length, 'candidates in room state');
+                for (const cand of json.data.candidates) {
+                  if (cand && typeof cand === 'object') {
+                    try {
+                      // simple-peer handles candidates via signal() method
+                      peerRef.current.signal(cand as Peer.SignalData | string);
+                    } catch (e) {
+                      console.warn('[INIT_FETCH] Failed to add candidate', e);
+                    }
+                  }
+                }
               }
 
               // If guardian already requested monitoring before we subscribed, handle it now (support guardian_command)
