@@ -361,10 +361,22 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       const tryAttach = () => {
         const pc = (p as unknown as { _pc?: RTCPeerConnection })?._pc;
         if (pc) {
-          pc.oniceconnectionstatechange = () => console.log('Guardian PC ICE state:', pc.iceConnectionState);
+          let lastIceState = pc.iceConnectionState;
+          let lastConnState = pc.connectionState;
+          
+          pc.oniceconnectionstatechange = () => {
+            if (pc.iceConnectionState !== lastIceState) {
+              console.log(`Guardian PC ICE state: ${lastIceState} → ${pc.iceConnectionState}`);
+              lastIceState = pc.iceConnectionState;
+            }
+          };
+          
           pc.onconnectionstatechange = () => {
-            const connState = (pc as RTCPeerConnection).connectionState || pc.iceConnectionState;
-            console.log('Guardian PC connection state:', connState);
+            const newState = pc.connectionState;
+            if (newState !== lastConnState) {
+              console.log(`Guardian PC connection state: ${lastConnState} → ${newState}`);
+              lastConnState = newState;
+            }
           };
 
           try {

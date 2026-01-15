@@ -194,9 +194,9 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     
     if (readyState < videoRef.current.HAVE_METADATA) {
       if (readyState === videoRef.current.HAVE_NOTHING) {
-        console.log('MonitoringSystem: video readyState is HAVE_NOTHING - no data loaded yet');
-      } else if (readyState === videoRef.current.HAVE_METADATA) {
-        console.log('MonitoringSystem: video readyState is HAVE_METADATA');
+        console.log('MonitoringSystem: video readyState is HAVE_NOTHING (0) - no data loaded yet');
+      } else if (readyState === videoRef.current.HAVE_CURRENT_DATA) {
+        console.log('MonitoringSystem: video readyState is HAVE_CURRENT_DATA (1) - has current frame');
       }
       return;
     }
@@ -387,6 +387,16 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           const audioTracks = remoteStream ? remoteStream.getAudioTracks().length : 0;
           const videoTracks = remoteStream ? remoteStream.getVideoTracks().length : 0;
           console.log('MonitoringSystem: remoteStream has', videoTracks, 'video and', audioTracks, 'audio tracks');
+          
+          // Log track details
+          if (remoteStream) {
+            remoteStream.getVideoTracks().forEach((t, i) => {
+              console.log(`  Video track ${i}: enabled=${t.enabled}, readyState=${t.readyState}, id=${t.id.substring(0, 8)}`);
+            });
+            remoteStream.getAudioTracks().forEach((t, i) => {
+              console.log(`  Audio track ${i}: enabled=${t.enabled}, readyState=${t.readyState}, id=${t.id.substring(0, 8)}`);
+            });
+          }
         } catch {}
 
         // If remoteStream is falsy, clear the srcObject and stop any playback
