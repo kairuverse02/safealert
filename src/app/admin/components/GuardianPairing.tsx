@@ -468,6 +468,18 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             if (pc.iceConnectionState !== lastIceState) {
               console.log(`Guardian PC ICE state: ${lastIceState} → ${pc.iceConnectionState}`);
               lastIceState = pc.iceConnectionState;
+              
+              // When ICE is connected, mark as paired and show monitoring interface
+              if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                console.log('Guardian: ICE connected, marking as paired');
+                setIsWaiting(false);
+                setIsPaired(true);
+                setShowMonitoring(true);
+                if (onPairingComplete) onPairingComplete();
+              } else if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+                console.log('Guardian: ICE failed/disconnected');
+                setIsWaiting(false);
+              }
             }
           };
           
@@ -476,6 +488,15 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             if (newState !== lastConnState) {
               console.log(`Guardian PC connection state: ${lastConnState} → ${newState}`);
               lastConnState = newState;
+              
+              // Also handle connection state for redundancy
+              if (newState === 'connected') {
+                console.log('Guardian: PC connected, marking as paired');
+                setIsWaiting(false);
+                setIsPaired(true);
+                setShowMonitoring(true);
+                if (onPairingComplete) onPairingComplete();
+              }
             }
           };
 
