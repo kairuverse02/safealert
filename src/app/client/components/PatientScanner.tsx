@@ -1,6 +1,5 @@
 "use client";
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { useWebRTC } from '@/contexts/WebRTCContext';
 import { useSoundDetection } from '@/hooks/useSoundDetection';
@@ -28,7 +27,6 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   const localStreamRef = useRef<MediaStream | null>(null);
   const pendingMicTestRef = useRef<boolean>(false);
 
-  const router = useRouter();
   const { initAudio } = useAudio(false);
   
   // Get context state and methods
@@ -233,17 +231,8 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
     return () => window.removeEventListener('dependent-mic-test', handler as EventListener);
   }, [testMicNow]);
 
-  // Redirect to dashboard after 3 seconds if paired
-  useEffect(() => {
-    if (!isPaired) return;
-    
-    const timer = setTimeout(() => {
-      console.log('[PatientScanner] Auto-redirecting to dashboard after 3 seconds');
-      router.push('/client/dashboard');
-    }, 3000);
-    
-    return () => clearTimeout(timer);
-  }, [isPaired, router]);
+  // Removed auto-redirect - dependent should stay on pairing page to maintain WebRTC connection
+  // and continue listening for guardian commands
 
   // --- RENDER LOGIC ---
 
@@ -343,9 +332,6 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           >
             Test Mic
           </button>
-        </div>
-        <div style={{ marginTop: 12, fontSize: 12, color: '#666', textAlign: 'center' }}>
-          Redirecting to dashboard in 3 seconds...
         </div>
       </div>
     );
