@@ -968,13 +968,13 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
 
         {/* Controls Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {remoteStream && !isCameraActive ? (
+          {pairingRoomId ? (
             <button
               disabled
               className="bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-all w-full cursor-not-allowed"
-              title="Using remote feed"
+              title="Monitoring paired dependent's camera"
             >
-              Viewing Remote Feed
+              Remote Feed
             </button>
           ) : (
             <button
