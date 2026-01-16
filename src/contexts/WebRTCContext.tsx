@@ -268,10 +268,8 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' },
-            // Free TURN relay servers for NAT traversal
+            { urls: 'stun:global.stun.twilio.com:3478' },
+            // Multiple TURN servers for better NAT traversal
             {
               urls: 'turn:openrelay.metered.ca:80',
               username: 'openrelayproject',
@@ -286,9 +284,28 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
               urls: 'turn:openrelay.metered.ca:443?transport=tcp',
               username: 'openrelayproject',
               credential: 'openrelayproject'
+            },
+            // Additional free TURN servers
+            {
+              urls: 'turn:relay.metered.ca:80',
+              username: 'openrelayproject',
+              credential: 'openrelayproject'
+            },
+            {
+              urls: 'turn:relay.metered.ca:443',
+              username: 'openrelayproject',
+              credential: 'openrelayproject'
+            },
+            {
+              urls: 'turn:relay.metered.ca:443?transport=tcp',
+              username: 'openrelayproject',
+              credential: 'openrelayproject'
             }
           ],
-          iceCandidatePoolSize: 10
+          iceCandidatePoolSize: 10,
+          iceTransportPolicy: 'all',
+          bundlePolicy: 'max-bundle',
+          rtcpMuxPolicy: 'require'
         }
       });
       
