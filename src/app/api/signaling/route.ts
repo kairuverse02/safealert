@@ -10,8 +10,9 @@ export async function POST(req: Request) {
     const supabase = createServiceClient()
     const { data, error } = await supabase.from('pairing_rooms').insert({ id, offer_signal: null, answer_signal: null }).select()
     if (error) {
+      console.error('[SUPABASE ERROR]', JSON.stringify(error, null, 2))
       const msg = (error && error.message) || JSON.stringify(error)
-      return NextResponse.json({ error: msg }, { status: 500 })
+      return NextResponse.json({ error: msg, details: error }, { status: 500 })
     }
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {
