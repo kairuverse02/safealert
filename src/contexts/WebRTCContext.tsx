@@ -251,6 +251,8 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
                 const answerData = await answerResp.json().catch(() => null);
                 const answer = answerData?.data?.answer_signal;
                 
+                console.log('[WebRTCContext] Answer poll result:', { hasAnswer: !!answer, answerType: answer?.type, hasSdp: !!answer?.sdp });
+                
                 if (answer && answer.type === 'answer' && answer.sdp && answer.sdp !== lastAppliedAnswerSdp) {
                   console.log('[WebRTCContext] Received guardian answer, applying');
                   lastAppliedAnswerSdp = answer.sdp;
@@ -261,6 +263,8 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
                     clearInterval(answerPollRef.current);
                     answerPollRef.current = null;
                   }
+                } else if (answer && answer.sdp === lastAppliedAnswerSdp) {
+                  console.log('[WebRTCContext] Answer SDP already applied, skipping');
                 }
               } catch (e) {
                 console.warn('[WebRTCContext] Answer poll error:', e);
