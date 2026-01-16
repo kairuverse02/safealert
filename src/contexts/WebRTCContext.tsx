@@ -267,29 +267,11 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun.relay.metered.ca:80' },
-            {
-              urls: 'turn:global.relay.metered.ca:80',
-              username: 'e9f4949ce4235c5972eaed58',
-              credential: 'uHh9xgP3lNEq+sit'
-            },
-            {
-              urls: 'turn:global.relay.metered.ca:80?transport=tcp',
-              username: 'e9f4949ce4235c5972eaed58',
-              credential: 'uHh9xgP3lNEq+sit'
-            },
-            {
-              urls: 'turn:global.relay.metered.ca:443',
-              username: 'e9f4949ce4235c5972eaed58',
-              credential: 'uHh9xgP3lNEq+sit'
-            },
-            {
-              urls: 'turns:global.relay.metered.ca:443?transport=tcp',
-              username: 'e9f4949ce4235c5972eaed58',
-              credential: 'uHh9xgP3lNEq+sit'
-            }
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' }
           ],
-          iceTransportPolicy: 'all'
+          iceCandidatePoolSize: 10
         }
       });
       
@@ -346,6 +328,25 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         console.error('[WebRTCContext] Peer error:', err);
         setConnectionState('failed');
       });
+      
+      // Access native RTCPeerConnection for ICE state logging
+      const nativePc = (peer as unknown as { _pc?: RTCPeerConnection })._pc;
+      if (nativePc) {
+        nativePc.oniceconnectionstatechange = () => {
+          console.log('[WebRTCContext] Dependent ICE state:', nativePc.iceConnectionState);
+        };
+        nativePc.onconnectionstatechange = () => {
+          console.log('[WebRTCContext] Dependent connection state:', nativePc.connectionState);
+        };
+        nativePc.onicegatheringstatechange = () => {
+          console.log('[WebRTCContext] Dependent ICE gathering state:', nativePc.iceGatheringState);
+        };
+        nativePc.onicecandidate = (evt) => {
+          if (evt.candidate) {
+            console.log('[WebRTCContext] Dependent ICE candidate generated: type=', evt.candidate.type, 'protocol=', evt.candidate.protocol);
+          }
+        };
+      }
       
       // Setup realtime subscription
       console.log('[WebRTCContext] Setting up realtime subscription...');
