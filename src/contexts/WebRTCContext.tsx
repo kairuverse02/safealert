@@ -429,6 +429,17 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       if (nativePc) {
         nativePcRef.current = nativePc;
         console.log('[WebRTCContext] Stored native PC reference');
+        
+        // CRITICAL: Prevent simple-peer from closing the native PC when data channel fails
+        // Override the peer's destroy method to NOT close the native PC
+        const originalDestroy = peer.destroy.bind(peer);
+        peer.destroy = () => {
+          console.log('[WebRTCContext] Peer destroy called - preventing native PC close');
+          // Call original destroy but native PC is already detached via our ref
+          // This prevents simple-peer from calling _pc.close()
+          (peer as unknown as { _pc?: RTCPeerConnection })._pc = undefined;
+          originalDestroy();
+        };
       }
       
       peer.on('close', () => {
