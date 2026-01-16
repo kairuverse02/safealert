@@ -132,7 +132,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     [initAudio, playSound, pairingRoomId]
   );
 
-  const { startCamera, stopCamera, streamRef, isCameraActive } = useCamera(
+  const { startCamera, stopCamera, isCameraActive } = useCamera(
     videoRef,
     triggerAlert
   );
@@ -148,7 +148,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     triggerAlert,
     triggerAlert,
     initAudio,
-    remoteStream || streamRef.current
+    remoteStream // Only use remoteStream for sound detection, not guardian's local camera
   );
 
   // Removed SOS hook
@@ -176,7 +176,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
 
   const animationLoop = useCallback(() => {
     animationFrameIdRef.current = requestAnimationFrame(animationLoop);
-    const sourceStream = remoteStream || streamRef.current;
+    const sourceStream = remoteStream; // Only use remoteStream from dependent, never guardian's local camera
 
     if (!sourceStream) {
       return;
@@ -336,7 +336,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     ctx.restore();
 
     lastFrameDataRef.current = new Uint8ClampedArray(currentFrameData);
-  }, [drawPerimeter, checkPerimeterCrossing, triggerAlert, streamRef, remoteStream]);
+  }, [drawPerimeter, checkPerimeterCrossing, triggerAlert, remoteStream]);
 
   // --- Patient Motion Alert ---
   useEffect(() => {
