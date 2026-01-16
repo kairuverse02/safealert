@@ -58,6 +58,8 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
   const supabase = createClient();
   const pollRef = useRef<number | null>(null);
   const commandPollRef = useRef<number | null>(null);
+  const answerPollRef = useRef<number | null>(null);
+  const answerPollRef = useRef<number | null>(null);
 
   // Cleanup function
   const destroyConnection = useCallback(() => {
@@ -73,6 +75,12 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
     if (commandPollRef.current) {
       clearInterval(commandPollRef.current);
       commandPollRef.current = null;
+    }
+    
+    // Stop answer polling
+    if (answerPollRef.current) {
+      clearInterval(answerPollRef.current);
+      answerPollRef.current = null;
     }
     
     // Unsubscribe from realtime
@@ -205,6 +213,35 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             body: JSON.stringify({ offer_signal: offer }),
           });
           console.log('[WebRTCContext] Sent renegotiation offer:', resp.status);
+          
+          // Poll for guardian's answer
+          if (resp.ok) {
+            console.log('[WebRTCContext] Polling for guardian answer to renegotiation');
+            let lastAppliedAnswerSdp: string | null = null;
+            if (answerPollRef.current) clearInterval(answerPollRef.current);
+            
+            answerPollRef.current = window.setInterval(async () => {
+              try {
+                const answerResp = await fetch(`/api/signaling/${currentRoomId}`);
+                const answerData = await answerResp.json().catch(() => null);
+                const answer = answerData?.data?.answer_signal;
+                
+                if (answer && answer.type === 'answer' && answer.sdp && answer.sdp !== lastAppliedAnswerSdp) {
+                  console.log('[WebRTCContext] Received guardian answer, applying');
+                  lastAppliedAnswerSdp = answer.sdp;
+                  await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                  console.log('[WebRTCContext] Renegotiation complete');
+                  // Stop polling after receiving answer
+                  if (answerPollRef.current) {
+                    clearInterval(answerPollRef.current);
+                    answerPollRef.current = null;
+                  }
+                }
+              } catch (e) {
+                console.warn('[WebRTCContext] Answer poll error:', e);
+              }
+            }, 1000);
+          }
         }
       }
       
