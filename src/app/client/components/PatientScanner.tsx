@@ -233,14 +233,14 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
     return () => window.removeEventListener('dependent-mic-test', handler as EventListener);
   }, [testMicNow]);
 
-  // Redirect to dashboard after 25 seconds if paired
+  // Redirect to dashboard after 3 seconds if paired
   useEffect(() => {
     if (!isPaired) return;
     
     const timer = setTimeout(() => {
-      console.log('[PatientScanner] Auto-redirecting to dashboard after 25 seconds');
+      console.log('[PatientScanner] Auto-redirecting to dashboard after 3 seconds');
       router.push('/client/dashboard');
-    }, 25000);
+    }, 3000);
     
     return () => clearTimeout(timer);
   }, [isPaired, router]);
@@ -345,7 +345,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
           </button>
         </div>
         <div style={{ marginTop: 12, fontSize: 12, color: '#666', textAlign: 'center' }}>
-          Redirecting to dashboard in 25 seconds...
+          Redirecting to dashboard in 3 seconds...
         </div>
       </div>
     );
