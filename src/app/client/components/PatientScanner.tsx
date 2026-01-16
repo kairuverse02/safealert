@@ -111,9 +111,10 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
     scannerRef.current?.clear().catch(e => console.error("Scanner clear failed", e));
 
     try {
-      // Get camera stream
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      console.log('[PatientScanner] Got camera stream - video:', stream.getVideoTracks().length, 'audio:', stream.getAudioTracks().length);
+      // Get camera stream ONLY for local preview (not for initial connection)
+      // This avoids m-line mismatch with guardian's offer
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      console.log('[PatientScanner] Got camera stream for preview - video:', stream.getVideoTracks().length, 'audio:', stream.getAudioTracks().length);
       
       // Show local preview
       if (myVideoRef.current) {
@@ -122,7 +123,8 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
       
       localStreamRef.current = stream;
       
-      // Pair using context
+      // Pair using context WITHOUT tracks initially (tracks will be added when guardian sends start_monitor command)
+      // This ensures no m-line mismatch with guardian's initial offer
       await pairWithRoom(roomId, stream);
       
       // Store room ID for persistence
@@ -355,10 +357,14 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
         <h2 style={styles.title}>Connecting to Guardian...</h2>
         <div style={{ fontSize: 12, color: '#666', marginBottom: 16 }}>
           <div><strong>Room:</strong> {currentRoomId || '—'}</div>
-          <div><strong>Status:</strong> {connectionState || 'Initiating'}</div>
+          <div><strong>ICE Status:</strong> {connectionState || 'Initiating'}</div>
         </div>
         <Spinner />
-        <p style={{ textAlign: 'center', marginTop: 12, color: '#666' }}>Waiting for guardian to connect...</p>
+        <p style={{ textAlign: 'center', marginTop: 12, color: '#666' }}>
+          Establishing peer connection with guardian...
+          <br />
+          <span style={{ fontSize: 11 }}>Waiting for ICE negotiation to complete</span>
+        </p>
       </div>
     );
   }

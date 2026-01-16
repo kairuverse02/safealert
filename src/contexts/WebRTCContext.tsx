@@ -257,11 +257,12 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
     setLocalStream(stream);
     
     try {
-      // Create peer connection
+      // Create peer connection WITHOUT stream initially to avoid m-line mismatch
+      // Stream will be added when guardian sends start_monitor command
       const peer = new Peer({
         initiator: false,
         trickle: true,
-        stream: stream,
+        stream: undefined, // Don't send stream initially
         channelConfig: { ordered: false },
         config: {
           iceServers: [
@@ -349,7 +350,19 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       const nativePc = (peer as unknown as { _pc?: RTCPeerConnection })._pc;
       if (nativePc) {
         nativePc.oniceconnectionstatechange = () => {
-          console.log('[WebRTCContext] Dependent ICE state:', nativePc.iceConnectionState);
+          const iceState = nativePc.iceConnectionState;
+          console.log('[WebRTCContext] Dependent ICE state:', iceState);
+          
+          // Update isPaired when ICE is connected (don't wait for data channel)
+          if (iceState === 'connected' || iceState === 'completed') {
+            console.log('[WebRTCContext] ICE connected - marking as paired');
+            setConnectionState('connected');
+            setIsPaired(true);
+            setIsPairing(false);
+          } else if (iceState === 'failed' || iceState === 'disconnected') {
+            console.log('[WebRTCContext] ICE failed/disconnected');
+            setConnectionState(iceState);
+          }
         };
         nativePc.onconnectionstatechange = () => {
           console.log('[WebRTCContext] Dependent connection state:', nativePc.connectionState);
