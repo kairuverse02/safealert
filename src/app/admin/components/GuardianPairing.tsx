@@ -165,7 +165,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       });
       const json = await resp.json();
       if (!resp.ok) {
-        console.error('Failed to create room via API', json);
+        console.error('Failed to create room via API - Status:', resp.status, 'Error:', json?.error, 'Full response:', json);
         setErrorMsg(json?.error || 'Failed to create pairing room');
         setIsWaiting(false);
         return;
