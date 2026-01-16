@@ -5,7 +5,8 @@ export function createServiceClient() {
   // Accept either exact env var name or a lowercase variant that might exist in .env.local
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.supabase_service_role_key
   
-  console.log('[SERVICE CLIENT DEBUG] URL exists:', !!url, 'Key exists:', !!key)
+  console.log('[SERVICE CLIENT DEBUG] URL:', url?.substring(0, 30) + '...', 'URL length:', url?.length)
+  console.log('[SERVICE CLIENT DEBUG] Key starts:', key?.substring(0, 20) + '...', 'Key ends:', '...' + key?.substring(key.length - 10), 'Key length:', key?.length)
   
   if (!url || !key) {
     const missing = [] as string[]
