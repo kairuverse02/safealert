@@ -187,6 +187,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       initiator: true,
       trickle: true,
       stream: localStream,
+      channelName: undefined, // Disable data channel - all signaling is database-based
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
