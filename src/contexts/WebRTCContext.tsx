@@ -448,7 +448,58 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       if (data?.data?.offer_signal) {
         console.log('[WebRTCContext] Found initial offer, signaling peer');
         peer.signal(data.data.offer_signal);
+        
+        // Also apply any initial ICE candidates from guardian
+        const initialCandidates = data.data.offer_signal.candidates;
+        if (Array.isArray(initialCandidates) && initialCandidates.length > 0) {
+          console.log('[WebRTCContext] Found', initialCandidates.length, 'initial candidates from guardian');
+          initialCandidates.forEach((c: RTCIceCandidateInit) => {
+            try {
+              peer.signal({ type: 'candidate', candidate: c } as Peer.SignalData);
+            } catch (e) {
+              console.warn('[WebRTCContext] Failed to signal initial candidate:', e);
+            }
+          });
+        }
       }
+      
+      // Start polling for guardian's ICE candidates since realtime may be unreliable
+      let appliedCandidateCount = data?.data?.offer_signal?.candidates?.length || 0;
+      const candidatePollInterval = window.setInterval(async () => {
+        try {
+          const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+          const iceState = pc?.iceConnectionState;
+          
+          // Stop polling once ICE is connected
+          if (iceState === 'connected' || iceState === 'completed') {
+            console.log('[WebRTCContext] ICE connected, stopping candidate poll');
+            clearInterval(candidatePollInterval);
+            return;
+          }
+          
+          const pollResp = await fetch(`/api/signaling/${roomId}`);
+          const pollData = await pollResp.json();
+          const candidates = pollData?.data?.offer_signal?.candidates;
+          
+          if (Array.isArray(candidates) && candidates.length > appliedCandidateCount) {
+            const newCandidates = candidates.slice(appliedCandidateCount);
+            console.log(`[WebRTCContext] Poll: applying ${newCandidates.length} new guardian candidates`);
+            newCandidates.forEach((c: RTCIceCandidateInit) => {
+              try {
+                peerRef.current?.signal({ type: 'candidate', candidate: c } as Peer.SignalData);
+              } catch (e) {
+                console.warn('[WebRTCContext] Failed to signal polled candidate:', e);
+              }
+            });
+            appliedCandidateCount = candidates.length;
+          }
+        } catch (e) {
+          console.warn('[WebRTCContext] Candidate poll error:', e);
+        }
+      }, 1000);
+      
+      // Store interval ref for cleanup
+      pollRef.current = candidatePollInterval;
       
     } catch (err) {
       console.error('[WebRTCContext] Pairing failed:', err);

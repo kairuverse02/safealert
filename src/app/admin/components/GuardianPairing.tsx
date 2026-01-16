@@ -32,6 +32,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
   const lastAppliedAnswerSdpRef = useRef<string | null>(null);
   // Guard to avoid applying the same answer concurrently (poll vs realtime)
   const applyingAnswerRef = useRef(false);
+  // Track the number of candidates already applied to avoid re-applying same candidates
+  const appliedCandidateCountRef = useRef(0);
   const [remoteStreamState, setRemoteStreamState] = useState<MediaStream | null>(null);
   const [showMonitoring, setShowMonitoring] = useState(false);
   const [isMuted] = useState(false);
@@ -195,7 +197,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
         // Persist offer, answer, or candidates back to DB
         const offerSignal = offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] === 'offer' : false;
         const answerSignal = offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] === 'answer' : false;
-        const candidateSignal = offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] === 'candidate' : false;
+        // ICE candidates from simple-peer have {candidate: {...}} without type field, OR type === 'candidate'
+        const candidateSignal = offer && typeof offer === 'object' ? !!((offer as Record<string, unknown>)['candidate'] || (offer as Record<string, unknown>)['type'] === 'candidate') : false;
         console.log('[DEBUG] Signal types - offerSignal:', offerSignal, 'answerSignal:', answerSignal, 'candidateSignal:', candidateSignal);
         
         if (offerSignal) {
@@ -228,13 +231,13 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           }
           console.log('Answer published to pairing_rooms via API', id, json?.data);
         } else if (candidateSignal) {
-          // Merge candidate into existing answer (avoid overwriting SDP)
-          console.log('Guardian: sending ICE candidate to dependent (merging with existing answer)');
+          // Guardian is the offerer, so its ICE candidates should be merged into offer_signal
+          console.log('Guardian: sending ICE candidate (merging with existing offer)');
           try {
             const resp = await fetch(`/api/signaling/${id}`);
             const data = await resp.json().catch(() => null);
-            const existingAnswer = data?.data?.answer_signal || {};
-            const candidates = Array.isArray(existingAnswer.candidates) ? existingAnswer.candidates : [];
+            const existingOffer = data?.data?.offer_signal || {};
+            const candidates = Array.isArray(existingOffer.candidates) ? existingOffer.candidates : [];
             
             // Add this candidate if not already present
             const candidateObj = (offer as Record<string, unknown>)?.candidate;
@@ -245,10 +248,10 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             const updateResp = await fetch(`/api/signaling/${id}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ answer_signal: { ...existingAnswer, candidates } }),
+              body: JSON.stringify({ offer_signal: { ...existingOffer, candidates } }),
             });
             const json = await updateResp.json().catch(() => null);
-            console.log('Guardian: merged candidate response', updateResp.status, json);
+            console.log('Guardian: merged candidate into offer response', updateResp.status, json);
           } catch (err) {
             console.warn('Guardian: failed to merge candidate', err);
           }
@@ -306,22 +309,30 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                     console.log('Guardian: polled answer SDP already applied or is being applied, will process candidates only', ans.candidates || ans.candidate);
                   }
 
-                  // Also apply any candidates included in the update (do not reapply full answer if SDP is same)
+                  // Also apply any NEW candidates included in the update (skip already-applied ones)
                   const candidates = ans.candidates || ans.candidate ? (ans.candidates || [ans.candidate]) : [];
-                  if (Array.isArray(candidates) && candidates.length > 0) {
-                    (candidates as RTCIceCandidateInit[]).forEach((c) => {
+                  if (Array.isArray(candidates) && candidates.length > appliedCandidateCountRef.current) {
+                    const newCandidates = candidates.slice(appliedCandidateCountRef.current);
+                    console.log(`Guardian: applying ${newCandidates.length} new candidates (total: ${candidates.length}, already applied: ${appliedCandidateCountRef.current})`);
+                    (newCandidates as RTCIceCandidateInit[]).forEach((c) => {
                       try {
                         peerRef.current?.signal({ type: 'candidate', candidate: c as unknown as RTCIceCandidate });
                       } catch (e) {
                         console.warn('Failed to signal candidate from poll', e);
                       }
                     });
+                    appliedCandidateCountRef.current = candidates.length;
                   }
 
-                  // We can stop polling after we've applied the answer + candidates
-                  if (answerPollRef.current && hasAppliedAnswerRef.current) {
-                    clearInterval(answerPollRef.current);
-                    answerPollRef.current = null;
+                  // Check ICE connection state - only stop polling when ICE is connected or completed
+                  const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+                  const iceState = pc?.iceConnectionState;
+                  if (iceState === 'connected' || iceState === 'completed') {
+                    console.log('Guardian: ICE connected, stopping answer poll');
+                    if (answerPollRef.current) {
+                      clearInterval(answerPollRef.current);
+                      answerPollRef.current = null;
+                    }
                   }
                 } else {
                   console.log('Guardian: poll found only candidates or transceiver requests (no sdp yet), continuing to poll and will apply once answer SDP appears', ans);
