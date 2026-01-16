@@ -59,7 +59,6 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
   const pollRef = useRef<number | null>(null);
   const commandPollRef = useRef<number | null>(null);
   const answerPollRef = useRef<number | null>(null);
-  const answerPollRef = useRef<number | null>(null);
 
   // Cleanup function
   const destroyConnection = useCallback(() => {
