@@ -151,8 +151,8 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     initAudio,
     remoteStream || streamRef.current
   );
-  // Removed SOS hook
 
+  // Removed SOS hook
   const setMode = (newMode: MonitoringMode) => {
     setPatientMotionFrameCount(0);
     lastFrameDataRef.current = null;
@@ -177,7 +177,6 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
 
   const animationLoop = useCallback(() => {
     animationFrameIdRef.current = requestAnimationFrame(animationLoop);
-
     const sourceStream = remoteStream || streamRef.current;
 
     if (

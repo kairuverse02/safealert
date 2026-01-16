@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'; // ✨ FIX: Imported useEffect
+import { useState, useRef, useEffect } from 'react';
 import { User, Settings, LogOut,  FileText } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -44,8 +44,7 @@ export default function Navbar({
   const toggleDropdown = () => {
     setIsDropdownOpen(!isDropdownOpen);
   };
-
-  // Set mounted to true only on the client, after hydration
+  
   useEffect(() => {
     setIsMounted(true);
   }, []);
@@ -57,13 +56,10 @@ export default function Navbar({
         setIsDropdownOpen(false);
       }
     };
-
     // Add event listener when dropdown is open
     if (isDropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
-
-    // Cleanup event listener
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };

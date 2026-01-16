@@ -7,24 +7,23 @@ export default function Home() {
     <main className="min-h-screen text-slate-800 font-sans" style={{ backgroundColor: '#f8f9fa' }}>
       
       {/* --- NAVIGATION BAR --- */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-white shadow-md">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      <nav className="bg-white shadow-md">
+        <div className="px-4 sm:px-6 lg:px-10">
+            <div className="flex items-center ml-10 h-20 gap-2">
             <Image src="/assets/SafeAlertMainLogo.png" alt="SafeAlert Logo" width={40} height={40} className="border-0" />
             <Image
                 src="/assets/textlogo.svg"
                 alt="Brand Name"
                 width={120}
                 height={32}
-                className="h-8 w-auto cursor-pointer hidden sm:block"
-              />
-          </div>
+                className="h-8 w-auto cursor-pointer hidden sm:block"/>
+            </div>
         </div>
       </nav>
       
       {/* --- SECTION 1: HERO --- */}
       <section 
-        className="flex flex-col items-start justify-center min-h-[90vh] pl-12 md:pl-24 pr-4 pt-20"
+        className="flex flex-col items-start justify-center mx-auto min-h-[90vh] pl-12 md:pl-24 pr-4 pt-20"
         style={{
           backgroundImage: 'url(/assets/HeroBG.jpg)',
           backgroundSize: 'cover',
@@ -32,24 +31,22 @@ export default function Home() {
           backgroundAttachment: 'fixed'
         }}
       >
-        <div className="ml-8">
-        <span className="text-sm font-bold tracking-widest text-white uppercase px-4 py-2 rounded-full w-fit" style={{ backgroundColor: '#2a7d4d' }}>
+      <div className="mx-8 max-w-5xl">
+        <p className="text-sm font-bold text-white uppercase px-4 py-2 rounded-full inline-block" style={{ backgroundColor: '#2a7d4d' }}>
           Welcome to SafeAlert!
-        </span>
-
-        <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight text-white max-w-3xl mb-6 mt-4">
+        </p>
+        <h1 className="text-5xl md:text-6xl sm:text-lg font-extrabold text-white max-w-3xl mb-6 mt-4">
           Your Home, Secured With <span style={{ color: '#FF5733' }}>Smart Boundaries.</span>
         </h1>
-        <p className="text-lg md:text-lg text-white max-w-2xl mb-10 leading-relaxed">
-          The intelligent web-based human monitoring system. 
+        
+        <p className="text-lg md:text-lg text-white mb-10">
+          The intelligent web-based human monitoring system. <br/>
           Set your perimeter, pair your devices, and get real-time alerts instantly.
         </p>
-        <div className="transform hover:scale-105 transition duration-200">
           <StartButton />
         </div>
-        </div>
-
       </section>
+
 
       {/* --- SECTION 2: PRODUCT FEATURES --- */}
       <section className="py-24 bg-white border-t border-slate-200">
