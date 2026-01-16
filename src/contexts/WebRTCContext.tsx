@@ -171,6 +171,8 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       
       // Add tracks to peer connection
       const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+      console.log('[WebRTCContext] Peer ref exists:', !!peerRef.current, 'Native PC exists:', !!pc);
+      
       if (pc) {
         console.log('[WebRTCContext] Adding tracks to peer connection...');
         
