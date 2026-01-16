@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+// This is a small Node-only test script which intentionally uses `require`.
 const http = require('http');
 const url = 'http://localhost:3001/role/auth/confirm?token_hash=abc&type=signup';
 const req = http.request(url, { method: 'GET' }, (res) => {

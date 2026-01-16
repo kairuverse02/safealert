@@ -67,7 +67,6 @@ const SOSButton = () => {
 
   // send the dependent action to guardian when notified becomes true
   useEffect(() => {
-    let mounted = true
     if (notified && !sentRef.current) {
       sentRef.current = true
       ;(async () => {
@@ -87,7 +86,7 @@ const SOSButton = () => {
         }
       })()
     }
-    return () => { mounted = false }
+    return () => {}
   }, [notified])
 
   const handleSOSClick = () => {

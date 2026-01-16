@@ -81,17 +81,17 @@ export function useAudio(isMuted: boolean) {
           try { master.gain.linearRampTo(0.6, 0.15); } catch {}
 
           // Stop after 15s and clean up LFOs/oscillators
-          const stopTimeout = setTimeout(() => {
-            try { master.gain.linearRampTo(0, 0.4); } catch (e) {}
+          setTimeout(() => {
+            try { master.gain.linearRampTo(0, 0.4); } catch {}
             setTimeout(() => {
-              try { lfoA.stop(); lfoA.dispose(); } catch (e) {}
-              try { lfoB.stop(); lfoB.dispose(); } catch (e) {}
-              try { oscA.stop(); oscA.dispose(); } catch (e) {}
-              try { oscB.stop(); oscB.dispose(); } catch (e) {}
-              try { master.dispose(); } catch (e) {}
+              try { lfoA.stop(); lfoA.dispose(); } catch {}
+              try { lfoB.stop(); lfoB.dispose(); } catch {}
+              try { oscA.stop(); oscA.dispose(); } catch {}
+              try { oscB.stop(); oscB.dispose(); } catch {}
+              try { master.dispose(); } catch {}
             }, 500);
           }, 15000);
-        } catch (e) {
+        } catch {
           // Fallback to sustained synth with long release if oscillator creation fails
           if (synthRef.current) synthRef.current.triggerAttackRelease("C7", "15s", toneNow);
         }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import NavBar from '@/app/client/NavBar';
 import "@/styles/globals.css";
+import { WebRTCProvider } from '@/contexts/WebRTCContext';
 
 export const metadata: Metadata = {
   title: "Safealert",
@@ -13,9 +14,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <>
+    <WebRTCProvider>
       <NavBar />
       <div className="contaier mx-auto px-4 sm:px-6 lg:px-8">{children}</div>
-    </>
+    </WebRTCProvider>
   );
 }

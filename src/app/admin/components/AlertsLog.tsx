@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // 'use client'
 // import React, { useState } from 'react'
 // import { LogEntry } from "@/types";
@@ -46,6 +47,10 @@
 //       </p>
 //     );
 //   };
+=======
+'use client'
+import React from 'react'
+>>>>>>> 3bc0c289355ca492d584a751426c87129bcbe296
 
 // const AlertsLog = () => {
 //     const [logEntries] = useState<LogEntry[]>([]);
@@ -60,4 +65,22 @@
 //   )
 // }
 
+<<<<<<< HEAD
 // export default AlertsLog
+=======
+
+const AlertsLog = () => {
+  return (
+    <div>
+      <div className='bg-neutral-200 h-[440px]'>
+        <h1 className='pl-2 text-black font-semibold text-lg '>
+        Events Log
+        </h1>
+
+      </div>
+    </div>
+  )
+}
+
+export default AlertsLog
+>>>>>>> 3bc0c289355ca492d584a751426c87129bcbe296

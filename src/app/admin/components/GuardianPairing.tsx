@@ -22,9 +22,9 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
   const [isMonitoring, setIsMonitoring] = useState<boolean>(false);
   const peerRef = useRef<Peer.Instance | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null); // Accumulate all remote tracks here
   const answerPollRef = useRef<number | null>(null); // interval id for polling answer as a fallback
   const hasStartedPollingRef = useRef(false);
   // Track whether an answer SDP has already been applied to avoid duplicate signaling
@@ -32,18 +32,24 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
   const lastAppliedAnswerSdpRef = useRef<string | null>(null);
   // Guard to avoid applying the same answer concurrently (poll vs realtime)
   const applyingAnswerRef = useRef(false);
+  // Track the number of candidates already applied to avoid re-applying same candidates
+  const appliedCandidateCountRef = useRef(0);
+  // Collect guardian's own ICE candidates for persisting to DB
+  const collectedCandidatesRef = useRef<RTCIceCandidate[]>([]);
+  // Track whether initial offer has been published so we know when to merge candidates
+  const offerPublishedRef = useRef(false);
   const [remoteStreamState, setRemoteStreamState] = useState<MediaStream | null>(null);
   const [showMonitoring, setShowMonitoring] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted] = useState(false);
   const [localCameraActive, setLocalCameraActive] = useState(false);
-  const [localCameraError, setLocalCameraError] = useState<string | null>(null);
+  const [, setLocalCameraError] = useState<string | null>(null);
   const hasAddedRecvTransceiverRef = useRef(false); // avoid duplicate recv transceiver additions
 
   // Mic test diagnostics: timestamp (ms) when dependent requested a mic test
   const [micTestRequestAt, setMicTestRequestAt] = useState<number | null>(null);
   // UI indicators: whether a mic test was recently requested and whether audio was received as part of a mic test
-  const [micTestRequested, setMicTestRequested] = useState<boolean>(false);
-  const [micTestAudioReceived, setMicTestAudioReceived] = useState<boolean>(false);
+  const [, setMicTestRequested] = useState<boolean>(false);
+  const [, setMicTestAudioReceived] = useState<boolean>(false);
 
   const startLocalCamera = async () => {
     try {
@@ -86,7 +92,6 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       console.warn('[GUARDIAN] sendMonitoringRequest: roomId is not set, returning');
       return;
     }
-
     // Show the monitoring UI immediately so guardian can set perimeter / recalibrate even if dependent stream hasn't arrived
     if (start) {
       try { setShowMonitoring(true); } catch (e) { console.warn('[GUARDIAN] failed to set showMonitoring early', e); }
@@ -94,11 +99,12 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
 
     try {
       const action = start ? 'start_monitor' : 'stop_monitor';
-      console.log('[GUARDIAN] Sending monitoring request:', action, 'to room:', roomId);
+      const body = { guardian_command: action };
+      console.log('[GUARDIAN] Sending monitoring request (PATCH body):', body, 'to room:', roomId);
       const resp = await fetch(`/api/signaling/${roomId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dependent_action: action }),
+        body: JSON.stringify(body),
       });
       const json = await resp.json().catch(() => null);
       console.log('[GUARDIAN] Monitoring request response:', { status: resp.status, action, ok: resp.ok, json });
@@ -106,7 +112,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
         console.error('[GUARDIAN] Failed to send monitoring request', json);
         return;
       }
-      console.log('[GUARDIAN] Monitoring request succeeded:', action, json?.data || json);
+      console.log('[GUARDIAN] Monitoring request persisted to DB:', action, json?.data || json);
       setIsMonitoring(start);
     } catch (err) {
       console.error('[GUARDIAN] Failed to send monitoring request (exception)', err);
@@ -124,42 +130,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
   const supabase = useMemo(() => createClient(), []);
   const { initAudio, playSound } = useAudio(isMuted);
 
-  // If a dependent triggers an action while guardian UI is not showing monitoring,
-  // auto-open monitoring and audibly notify the guardian (best-effort).
-  useEffect(() => {
-    if (!roomId) return;
-    const channel = supabase
-      .channel(`room-action-${roomId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'pairing_rooms', filter: `id=eq.${roomId}` },
-        (payload: { new: { dependent_action?: string } }) => {
-          try {
-            const dep = payload.new.dependent_action;
-            console.log('GuardianPairing: received dependent_action', dep);
-            if (dep) {
-              try { setShowMonitoring(true); } catch {}
-
-              (async () => {
-                try {
-                  await initAudio();
-                  if (dep === 'sos') playSound('sos');
-                  else if (dep === 'bathroom') playSound('bathroom');
-                  else playSound('sound');
-                } catch (e) {
-                  console.warn('GuardianPairing: failed to play notification sound', e);
-                }
-              })();
-            }
-          } catch (e) {
-            console.warn('GuardianPairing: failed processing dependent_action realtime', e);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => { try { channel.unsubscribe(); } catch {} };
-  }, [roomId, supabase, initAudio, playSound]);
+  // NOTE: dependent_action handling moved to main channel subscription below to avoid CHANNEL_ERROR
+  // (Supabase doesn't allow multiple subscriptions to same row with same filter)
 
   const createRoom = async () => {
     if (isWaiting) return;
@@ -167,6 +139,15 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
     setRoomId(id);
     if (onRoomCreated) onRoomCreated(id);
     setIsWaiting(true);
+    
+    // Reset refs for new room
+    collectedCandidatesRef.current = [];
+    offerPublishedRef.current = false;
+    appliedCandidateCountRef.current = 0;
+    hasAppliedAnswerRef.current = false;
+    lastAppliedAnswerSdpRef.current = null;
+    applyingAnswerRef.current = false;
+    hasStartedPollingRef.current = false;
 
     // Do NOT get guardian camera automatically at room creation to avoid prompting permissions.
     // The guardian can enable their local camera manually after the room is created.
@@ -184,7 +165,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       });
       const json = await resp.json();
       if (!resp.ok) {
-        console.error('Failed to create room via API', json);
+        console.error('Failed to create room via API - Status:', resp.status, 'Error:', json?.error, 'Full response:', json);
         setErrorMsg(json?.error || 'Failed to create pairing room');
         setIsWaiting(false);
         return;
@@ -206,8 +187,29 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       stream: localStream,
       config: {
         iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' }
-        ]
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
+          // Free TURN relay servers for NAT traversal
+          {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+          }
+        ],
+        iceCandidatePoolSize: 10
       }
     });
     peerRef.current = peer;
@@ -215,6 +217,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
     peer.on("signal", async (offer: unknown) => {
       try {
         console.log('Guardian: signal payload', offer);
+        console.log('[DEBUG] Signal event fired. Payload:', JSON.stringify(offer).substring(0, 200));
+        console.log('[DEBUG] Signal payload type check:', offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] : 'not object');
         // Determine a short descriptor for logging
         let desc = 'signal';
         if (offer && typeof offer === 'object') {
@@ -224,11 +228,14 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
         }
         console.log('Guardian: signal event (desc)', desc);
 
-        // Only persist initial SDP offer to DB to avoid it being overwritten by later candidate-only signals
-        const isOffer = !!(offer && typeof offer === 'object' && (offer as Record<string, unknown>)['type'] === 'offer');
-        if (!isOffer) {
-          console.log('Guardian: skipping DB PATCH for non-offer signal to avoid overwriting offer', desc);
-        } else {
+        // Persist offer, answer, or candidates back to DB
+        const offerSignal = offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] === 'offer' : false;
+        const answerSignal = offer && typeof offer === 'object' ? (offer as Record<string, unknown>)['type'] === 'answer' : false;
+        // ICE candidates from simple-peer have {candidate: {...}} without type field, OR type === 'candidate'
+        const candidateSignal = offer && typeof offer === 'object' ? !!((offer as Record<string, unknown>)['candidate'] || (offer as Record<string, unknown>)['type'] === 'candidate') : false;
+        console.log('[DEBUG] Signal types - offerSignal:', offerSignal, 'answerSignal:', answerSignal, 'candidateSignal:', candidateSignal);
+        
+        if (offerSignal) {
           console.log('Guardian: sending offer (persisting to DB)');
           const resp = await fetch(`/api/signaling/${id}`, {
             method: 'PATCH',
@@ -242,87 +249,163 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             return;
           }
           console.log('Offer published to pairing_rooms via API', id, json?.data);
+          
+          // Mark offer as published so we can now persist candidates
+          offerPublishedRef.current = true;
+          
+          // Flush any ICE candidates that were collected before offer was published
+          if (collectedCandidatesRef.current.length > 0) {
+            console.log('Guardian: flushing', collectedCandidatesRef.current.length, 'queued ICE candidates');
+            const offerWithCandidates = {
+              ...(offer as object),
+              candidates: collectedCandidatesRef.current.map(c => c.toJSON()),
+            };
+            const updateResp = await fetch(`/api/signaling/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ offer_signal: offerWithCandidates }),
+            });
+            const updateJson = await updateResp.json().catch(() => null);
+            console.log('Guardian: flushed queued candidates response', updateResp.status, updateJson);
+          }
+        } else if (answerSignal) {
+          // Send answer back to dependent (for renegotiation)
+          console.log('Guardian: sending answer to dependent (persisting to DB)');
+          const resp = await fetch(`/api/signaling/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ answer_signal: offer }),
+          });
+          const json = await resp.json().catch(() => null);
+          console.log('Guardian: publish answer response', resp.status, json);
+          if (!resp.ok) {
+            console.error('Failed to publish answer via API', json);
+            return;
+          }
+          console.log('Answer published to pairing_rooms via API', id, json?.data);
+        } else if (candidateSignal) {
+          // Guardian is the offerer, so its ICE candidates should be merged into offer_signal
+          console.log('Guardian: sending ICE candidate (merging with existing offer)');
+          try {
+            const resp = await fetch(`/api/signaling/${id}`);
+            const data = await resp.json().catch(() => null);
+            const existingOffer = data?.data?.offer_signal || {};
+            const candidates = Array.isArray(existingOffer.candidates) ? existingOffer.candidates : [];
+            
+            // Add this candidate if not already present
+            const candidateObj = (offer as Record<string, unknown>)?.candidate;
+            if (candidateObj && !candidates.find((c: unknown) => JSON.stringify(c) === JSON.stringify(candidateObj))) {
+              candidates.push(candidateObj);
+            }
+            
+            const updateResp = await fetch(`/api/signaling/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ offer_signal: { ...existingOffer, candidates } }),
+            });
+            const json = await updateResp.json().catch(() => null);
+            console.log('Guardian: merged candidate into offer response', updateResp.status, json);
+          } catch (err) {
+            console.warn('Guardian: failed to merge candidate', err);
+          }
+        }
 
-          // Start a fallback poll to detect answers in case realtime subscriptions miss the update
-          if (!hasStartedPollingRef.current) {
-            hasStartedPollingRef.current = true;
-            answerPollRef.current = window.setInterval(async () => {
-              try {
-                const resp = await fetch(`/api/signaling/${id}`);
-                const js = await resp.json().catch(() => null);
-                console.log('Guardian: poll for answer response', resp.status, js);
-                if (resp.ok && js?.data?.answer_signal && peerRef.current) {
-                  const ans = js.data.answer_signal;
-                  // Prefer applying only when an SDP string is present to avoid applying empty 'answer' objects
-                  const hasSdp = !!(ans && typeof ans.sdp === 'string' && ans.sdp.length > 0);
-                  if (hasSdp) {
-                    const sdp = ans.sdp as string;
-                    // Only attempt to apply if not already applying or applied
-                    if ((!hasAppliedAnswerRef.current && !applyingAnswerRef.current) || (sdp && lastAppliedAnswerSdpRef.current !== sdp && !applyingAnswerRef.current)) {
-                      applyingAnswerRef.current = true;
+        // Start a fallback poll to detect answers in case realtime subscriptions miss the update
+        // Only for initial offers (not for renegotiation answers/candidates)
+        if (offerSignal && !hasStartedPollingRef.current) {
+          hasStartedPollingRef.current = true;
+          answerPollRef.current = window.setInterval(async () => {
+            try {
+              const resp = await fetch(`/api/signaling/${id}`);
+              const js = await resp.json().catch(() => null);
+              console.log('Guardian: poll for answer response', resp.status, js);
+              if (resp.ok && js?.data?.answer_signal && peerRef.current) {
+                const ans = js.data.answer_signal;
+                // Prefer applying only when an SDP string is present to avoid applying empty 'answer' objects
+                const hasSdp = !!(ans && typeof ans.sdp === 'string' && ans.sdp.length > 0);
+                if (hasSdp) {
+                  const sdp = ans.sdp as string;
+                  // Only attempt to apply if not already applying or applied
+                  if ((!hasAppliedAnswerRef.current && !applyingAnswerRef.current) || (sdp && lastAppliedAnswerSdpRef.current !== sdp && !applyingAnswerRef.current)) {
+                    applyingAnswerRef.current = true;
+                    try {
+                      console.log('Guardian: found answer via poll (sdp present), signaling peer', ans);
+
+                      // If the answer includes a transceiver request for video, attempt to add a recvonly transceiver
                       try {
-                        console.log('Guardian: found answer via poll (sdp present), signaling peer', ans);
-
-                        // If the answer includes a transceiver request for video, attempt to add a recvonly transceiver
-                        try {
-                          const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                          const req = (ans && (ans.transceiverRequest || (Array.isArray(ans.transceiverRequests) ? ans.transceiverRequests[0] : null)));
-                          if (pc && req && (req.kind === 'video' || req.kind === 'audio')) {
-                            console.log('Guardian: answer requests transceiver for', req.kind, ', adding recvonly transceiver on PC');
-                            if (typeof pc.addTransceiver === 'function') {
-                              try {
-                                pc.addTransceiver(req.kind, { direction: 'recvonly' });
-                                console.log(`Guardian: added recvonly ${req.kind} transceiver`);
-                              } catch (e) {
-                                console.warn('Guardian: addTransceiver failed for', req.kind, e);
-                              }
+                        const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+                        const req = (ans && (ans.transceiverRequest || (Array.isArray(ans.transceiverRequests) ? ans.transceiverRequests[0] : null)));
+                        if (pc && req && (req.kind === 'video' || req.kind === 'audio')) {
+                          console.log('Guardian: answer requests transceiver for', req.kind, ', adding recvonly transceiver on PC');
+                          if (typeof pc.addTransceiver === 'function') {
+                            try {
+                              pc.addTransceiver(req.kind, { direction: 'recvonly' });
+                              console.log(`Guardian: added recvonly ${req.kind} transceiver`);
+                            } catch (e) {
+                              console.warn('Guardian: addTransceiver failed for', req.kind, e);
                             }
                           }
-                        } catch (e) {
-                          console.warn('Guardian: failed to add recv transceiver', e);
                         }
+                      } catch (_e) {
+                        console.warn('Guardian: failed to add recv transceiver', _e);
+                      }
 
-                        peerRef.current.signal(ans);
-                        hasAppliedAnswerRef.current = true;
-                        lastAppliedAnswerSdpRef.current = sdp;
-                      } catch (err) {
-                        console.warn('Guardian: failed to apply polled answer', err);
-                      } finally {
-                        applyingAnswerRef.current = false;
+                      peerRef.current.signal(ans);
+                      hasAppliedAnswerRef.current = true;
+                      lastAppliedAnswerSdpRef.current = sdp;
+                    } catch (err) {
+                      console.warn('Guardian: failed to apply polled answer', err);
+                    } finally {
+                      applyingAnswerRef.current = false;
+                    }
+                  } else {
+                    console.log('Guardian: polled answer SDP already applied or is being applied, will process candidates only', ans.candidates?.length || 0, 'candidates');
+                  }
+
+                  // Also apply any NEW candidates included in the update (skip already-applied ones)
+                  const candidates = ans.candidates || (ans.candidate ? [ans.candidate] : []);
+                  console.log('Guardian: answer_signal candidates array:', candidates.length, 'items, already applied:', appliedCandidateCountRef.current);
+                  if (Array.isArray(candidates) && candidates.length > appliedCandidateCountRef.current) {
+                    const newCandidates = candidates.slice(appliedCandidateCountRef.current);
+                    console.log(`Guardian: applying ${newCandidates.length} new dependent candidates via addIceCandidate`);
+                    const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+                    if (pc && pc.remoteDescription) {
+                      for (const c of newCandidates as RTCIceCandidateInit[]) {
+                        try {
+                          await pc.addIceCandidate(new RTCIceCandidate(c));
+                          console.log('Guardian: applied dependent candidate:', c.candidate?.substring(0, 60));
+                        } catch (e) {
+                          console.warn('Guardian: failed to add dependent candidate:', e);
+                        }
                       }
                     } else {
-                      console.log('Guardian: polled answer SDP already applied or is being applied, will process candidates only', ans.candidates || ans.candidate);
+                      console.warn('Guardian: cannot apply candidates - no PC or remote description not set');
                     }
+                    appliedCandidateCountRef.current = candidates.length;
+                  }
 
-                    // Also apply any candidates included in the update (do not reapply full answer if SDP is same)
-                    const candidates = ans.candidates || ans.candidate ? (ans.candidates || [ans.candidate]) : [];
-                    if (Array.isArray(candidates) && candidates.length > 0) {
-                      (candidates as RTCIceCandidateInit[]).forEach((c) => {
-                        try {
-                          peerRef.current?.signal({ type: 'candidate', candidate: c as unknown as RTCIceCandidate });
-                        } catch (e) {
-                          console.warn('Failed to signal candidate from poll', e);
-                        }
-                      });
-                    }
-
-                    // We can stop polling after we've applied the answer + candidates
-                    if (answerPollRef.current && hasAppliedAnswerRef.current) {
+                  // Check ICE connection state - only stop polling when ICE is connected or completed
+                  const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+                  const iceState = pc?.iceConnectionState;
+                  if (iceState === 'connected' || iceState === 'completed') {
+                    console.log('Guardian: ICE connected, stopping answer poll');
+                    if (answerPollRef.current) {
                       clearInterval(answerPollRef.current);
                       answerPollRef.current = null;
                     }
-                  } else {
-                    console.log('Guardian: poll found only candidates or transceiver requests (no sdp yet), continuing to poll and will apply once answer SDP appears', ans);
-                    // continue polling
                   }
+                } else {
+                  console.log('Guardian: poll found only candidates or transceiver requests (no sdp yet), continuing to poll and will apply once answer SDP appears', ans);
+                  // continue polling
                 }
-              } catch (err) {
-                console.warn('Guardian: poll for answer failed', err);
               }
-            }, 1000);
-          }
-        }      } catch (err) {
-        console.error('Failed to publish offer (exception)', err);
+            } catch (err) {
+              console.warn('Guardian: poll for answer failed', err);
+            }
+          }, 1000);
+        }
+      } catch (err) {
+        console.error('Failed to publish signal (exception)', err);
       }
     });
 
@@ -347,9 +430,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             }
           })();
         }
-      } catch (e) {
-        // noop
-      }
+      } catch {}
+
     });
 
     // Attach connection state logging if underlying RTCPeerConnection is available
@@ -362,34 +444,85 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       const tryAttach = () => {
         const pc = (p as unknown as { _pc?: RTCPeerConnection })?._pc;
         if (pc) {
-          pc.oniceconnectionstatechange = () => console.log('Guardian PC ICE state:', pc.iceConnectionState);
+          let lastIceState = pc.iceConnectionState;
+          let lastConnState = pc.connectionState;
+          
+          pc.oniceconnectionstatechange = () => {
+            if (pc.iceConnectionState !== lastIceState) {
+              console.log(`Guardian PC ICE state: ${lastIceState} → ${pc.iceConnectionState}`);
+              lastIceState = pc.iceConnectionState;
+            }
+          };
+          
           pc.onconnectionstatechange = () => {
-            const connState = (pc as RTCPeerConnection).connectionState || pc.iceConnectionState;
+            const newState = pc.connectionState;
+            if (newState !== lastConnState) {
+              console.log(`Guardian PC connection state: ${lastConnState} → ${newState}`);
+              lastConnState = newState;
+            }
           };
 
+          // Handle ICE candidates - collect and persist them to the offer_signal
           try {
-            pc.onicecandidate = (evt: RTCPeerConnectionIceEvent) => console.log('Guardian PC onicecandidate', evt && evt.candidate);
-          } catch (e) {}
+            pc.onicecandidate = async (evt: RTCPeerConnectionIceEvent) => {
+              console.log('Guardian PC onicecandidate', evt?.candidate);
+              if (evt?.candidate) {
+                // Log candidate type for debugging
+                console.log(`Guardian: ICE candidate type=${evt.candidate.type} protocol=${evt.candidate.protocol} address=${evt.candidate.address}`);
+                // If offer not yet published, queue the candidate
+                if (!offerPublishedRef.current) {
+                  console.log('Guardian: queuing ICE candidate (offer not yet published)');
+                  collectedCandidatesRef.current.push(evt.candidate);
+                } else {
+                  // Offer is published, merge candidate into offer_signal
+                  console.log('Guardian: persisting ICE candidate to offer_signal');
+                  try {
+                    const resp = await fetch(`/api/signaling/${id}`);
+                    const data = await resp.json().catch(() => null);
+                    const existingOffer = data?.data?.offer_signal || {};
+                    const candidates = Array.isArray(existingOffer.candidates) ? existingOffer.candidates : [];
+                    
+                    // Add this candidate if not already present
+                    const candidateJson = evt.candidate.toJSON();
+                    if (!candidates.find((c: unknown) => JSON.stringify(c) === JSON.stringify(candidateJson))) {
+                      candidates.push(candidateJson);
+                    }
+                    
+                    const updateResp = await fetch(`/api/signaling/${id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ offer_signal: { ...existingOffer, candidates } }),
+                    });
+                    const json = await updateResp.json().catch(() => null);
+                    console.log('Guardian: persisted ICE candidate response', updateResp.status, json);
+                  } catch (err) {
+                    console.warn('Guardian: failed to persist ICE candidate', err);
+                  }
+                }
+              }
+            };
+          } catch {}
 
           try {
             console.log('Guardian PC transceivers at attach:', pc.getTransceivers ? pc.getTransceivers() : []);
-          } catch (e) {}
+          } catch {}
 
           // If the guardian has no local camera active, proactively add a recvonly transceiver
           try {
             if (!localCameraActive && typeof pc.addTransceiver === 'function' && !hasAddedRecvTransceiverRef.current) {
               try {
-                // Add both video and audio recvonly transceivers so the dependent can send audio later when monitoring starts
+                // Add video and audio recvonly transceivers so dependent can send media
+                // Note: data channels are created automatically by simple-peer, not via addTransceiver
                 pc.addTransceiver('video', { direction: 'recvonly' });
                 pc.addTransceiver('audio', { direction: 'recvonly' });
                 console.log('Guardian: proactively added recvonly video and audio transceivers at attach');
                 hasAddedRecvTransceiverRef.current = true;
-                try { console.log('Guardian PC transceivers after proactive add:', pc.getTransceivers ? pc.getTransceivers() : []); } catch (e) {}
+                try { console.log('Guardian PC transceivers after proactive add:', pc.getTransceivers ? pc.getTransceivers() : []); } catch {}
               } catch (e) {
                 console.warn('Guardian: failed to proactively add recv transceivers', e);
               }
             }
-          } catch (e) {}
+          } catch {}
 
           // Fallback: listen for individual track events and build a MediaStream if simple-peer 'stream' doesn't fire
           try {
@@ -397,39 +530,43 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
               try {
                 console.log('Guardian PC ontrack event (raw):', ev);
                 console.log('[MIC_TEST] ontrack: track info:', { kind: ev.track?.kind, id: ev.track?.id, label: ev.track?.label });
-                if (Array.isArray(ev.streams) && ev.streams.length) {
-                  console.log('[MIC_TEST] ontrack: streams present count:', ev.streams.length);
-                  ev.streams.forEach((st: MediaStream, idx: number) => {
-                    console.log(`[MIC_TEST] ontrack: stream[${idx}] audioTracks:`, st.getAudioTracks().map(t => ({ id: t.id, label: t.label, enabled: t.enabled })));
-                  });
-                } else {
-                  console.log('[MIC_TEST] ontrack: no streams array, falling back to ev.track');
+                console.log('Guardian PC state at ontrack:', { connectionState: pc.connectionState, iceConnectionState: pc.iceConnectionState, signalingState: pc.signalingState });
+                
+                // Initialize remoteStream if it doesn't exist
+                if (!remoteStreamRef.current) {
+                  remoteStreamRef.current = new MediaStream();
+                  console.log('Guardian: created new remoteStream to accumulate tracks');
                 }
 
-                const tracks = Array.isArray(ev.streams) && ev.streams.length ? ev.streams[0].getTracks() : (ev.track ? [ev.track] : []);
-                const ms = new MediaStream();
-                tracks.forEach((t: MediaStreamTrack) => ms.addTrack(t));
-                console.log('[MIC_TEST] constructed fallback MediaStream audioTracks:', ms.getAudioTracks().map(t => ({ id: t.id, label: t.label, enabled: t.enabled })));
+                // Add this track to the accumulating stream
+                const currentRemoteStream = remoteStreamRef.current;
+                if (ev.track && !currentRemoteStream.getTracks().find(t => t.id === ev.track.id)) {
+                  currentRemoteStream.addTrack(ev.track);
+                  console.log('Guardian: added', ev.track.kind, 'track to remoteStream; total tracks:', currentRemoteStream.getTracks().length);
+                  // Log track state
+                  console.log(`Guardian: ${ev.track.kind} track enabled=${ev.track.enabled} readyState=${ev.track.readyState}`);
+                }
 
-                if (micTestRequestAt) console.log('[MIC_TEST] ontrack arrived AFTER mic test request at', new Date(micTestRequestAt).toISOString());
+                // Log track counts for diagnostics
+                const videoTracks = currentRemoteStream.getVideoTracks().length;
+                const audioTracks = currentRemoteStream.getAudioTracks().length;
+                console.log('Guardian: remoteStream now has', videoTracks, 'video and', audioTracks, 'audio tracks');
 
-                // If the constructed MediaStream has audio tracks, mark audio-received
-                try {
-                  const audioCount = ms.getAudioTracks().length;
-                  if (audioCount > 0) {
-                    setMicTestAudioReceived(true);
-                    setTimeout(() => setMicTestAudioReceived(false), 8000);
-                    console.log('[MIC_TEST] Guardian: ontrack produced a MediaStream with audio tracks; set micTestAudioReceived=true');
-                  }
-                } catch (e) { console.warn('[MIC_TEST] failed to check constructed MediaStream for audio tracks', e); }
-
-                setRemoteStreamState(ms);
+                // Update state with the accumulated stream
+                setRemoteStreamState(currentRemoteStream);
                 setTimeout(() => setShowMonitoring(true), 150);
+
+                // Mark audio received if we have audio tracks (for mic test diagnostics)
+                if (audioTracks > 0) {
+                  setMicTestAudioReceived(true);
+                  setTimeout(() => setMicTestAudioReceived(false), 8000);
+                  console.log('[MIC_TEST] Guardian: ontrack produced audio tracks; set micTestAudioReceived=true');
+                }
               } catch (e) {
                 console.warn('Guardian PC ontrack handler failed', e);
               }
             };
-          } catch (e) {}
+          } catch {}
         } else {
           setTimeout(tryAttach, 200);
         }
@@ -449,7 +586,33 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           table: "pairing_rooms",
           filter: `id=eq.${id}`,
         },
-        (payload: { new: { answer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; guardian_event?: { type?: string; [key: string]: unknown } | null } }) => {
+        (payload: { new: { offer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; answer_signal?: { type?: string; sdp?: string; candidates?: RTCIceCandidateInit[]; candidate?: RTCIceCandidateInit; transceiverRequest?: unknown; transceiverRequests?: unknown[]; [key: string]: unknown } | null; guardian_event?: { type?: string; [key: string]: unknown } | null; dependent_action?: string } }) => {
+          // LOG EVERY UPDATE EVENT RECEIVED
+          console.log('[REALTIME] UPDATE event received from database. Payload keys:', Object.keys(payload.new || {}));
+          console.log('[REALTIME] Full payload:', JSON.stringify(payload.new).substring(0, 300));
+          
+          // Handle dependent_action (consolidated from separate channel to avoid CHANNEL_ERROR)
+          try {
+            const dep = payload.new.dependent_action;
+            if (dep) {
+              console.log('GuardianPairing: received dependent_action', dep);
+              try { setShowMonitoring(true); } catch {}
+
+              (async () => {
+                try {
+                  await initAudio();
+                  if (dep === 'sos') playSound('sos');
+                  else if (dep === 'bathroom') playSound('bathroom');
+                  else playSound('sound');
+                } catch (e) {
+                  console.warn('GuardianPairing: failed to play notification sound', e);
+                }
+              })();
+            }
+          } catch (e) {
+            console.warn('GuardianPairing: failed processing dependent_action realtime', e);
+          }
+
           // Detect guardian_event messages published by the dependent (e.g., mic test start, mic unavailable, permission denied)
           try {
             const ge = payload.new.guardian_event;
@@ -468,8 +631,22 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                 console.warn('[MIC_TEST] Guardian: dependent reported microphone unavailable', ge);
               }
             }
-          } catch (e) {
-            console.warn('Failed to process guardian_event in realtime payload', e);
+          } catch (_e) {
+            console.warn('Failed to process guardian_event in realtime payload', _e);
+          }
+
+          // Handle renegotiation offer from dependent (when monitoring starts after pairing)
+          const offer = payload.new.offer_signal;
+          console.log('[REALTIME] Checking offer_signal:', { hasOffer: !!offer, hasPeer: !!peerRef.current, offerType: offer?.type, hasSdp: !!offer?.sdp });
+          if (offer && peerRef.current && offer.type === 'offer' && offer.sdp) {
+            try {
+              console.log('[REALTIME] Received renegotiation offer from dependent during monitoring');
+              // Signal the offer to simple-peer, which will trigger answer generation
+              peerRef.current.signal(offer as Peer.SignalData | string);
+              console.log('[REALTIME] Renegotiation offer signaled to peer');
+            } catch (err) {
+              console.error('[REALTIME] Failed to apply renegotiation offer', err);
+            }
           }
 
           const answer = payload.new.answer_signal;
@@ -502,6 +679,11 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                     console.warn('Guardian: failed to add recv transceiver (realtime)', e);
                   }
 
+                  // CRITICAL: Actually signal the answer to the peer connection!
+                  peerRef.current.signal(answer as Peer.SignalData);
+                  hasAppliedAnswerRef.current = true;
+                  if (sdp) lastAppliedAnswerSdpRef.current = sdp;
+                  console.log('Guardian: answer signaled to peer via realtime');
                 } catch (e) {
                   console.warn('Failed to signal full answer via realtime', e);
                 } finally {
@@ -543,7 +725,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                     console.warn('Guardian: failed to add recv transceiver (realtime candidates)', e);
                   }
                 }
-              } catch (e) {}
+              } catch {}
 
               (answer.candidates as RTCIceCandidateInit[]).forEach((c) => {
                 try {
@@ -568,7 +750,18 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           }
         }
       )
-      .subscribe();
+      .on('system', (msg: Record<string, unknown>) => {
+        console.log('[REALTIME] System message:', msg);
+      })
+      .on('postgres_changes', (payload: Record<string, unknown>) => {
+        console.log('[REALTIME] postgres_changes received:', payload);
+      })
+      .subscribe((status: string) => {
+        console.log('[REALTIME] Subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('[REALTIME] Subscription callback - now listening for real updates');
+        }
+      });
 
     peer.on("connect", () => {
       console.log("Guardian connected to patient");
