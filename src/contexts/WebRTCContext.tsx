@@ -308,7 +308,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         initiator: false,
         trickle: true,
         stream: undefined, // Don't send stream initially
-        channelConfig: { ordered: false },
+        channelName: undefined, // Disable data channel - we use database for signaling
         config: {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
