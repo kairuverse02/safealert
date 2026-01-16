@@ -191,20 +191,25 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         // Wait for stable connection state
         if (pc.signalingState !== 'stable') {
           console.log('[WebRTCContext] Waiting for stable signaling state..., current:', pc.signalingState);
+          let isClosed = false;
           await new Promise<void>((resolve) => {
             let attempts = 0;
             const check = setInterval(() => {
               attempts++;
               console.log('[WebRTCContext] Signaling state check attempt', attempts, ':', pc.signalingState);
-              if (pc.signalingState === 'stable' || pc.signalingState === 'closed' || attempts >= 100) {
+              if (pc.signalingState === 'stable') {
+                clearInterval(check);
+                resolve();
+              } else if (pc.signalingState === 'closed' || attempts >= 100) {
+                isClosed = (pc.signalingState === 'closed');
                 clearInterval(check);
                 resolve();
               }
             }, 100);
           });
           
-          // Recheck after waiting
-          if (pc.signalingState === 'closed') {
+          // Check if PC closed during wait
+          if (isClosed) {
             console.error('[WebRTCContext] PC closed while waiting for stable state');
             return;
           }
