@@ -54,6 +54,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 
   const peerRef = useRef<Peer.Instance | null>(null);
+  const nativePcRef = useRef<RTCPeerConnection | null>(null); // Keep reference to native PC
   const channelRef = useRef<RealtimeChannel | null>(null);
   const supabase = createClient();
   const pollRef = useRef<number | null>(null);
@@ -101,6 +102,9 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       }
       peerRef.current = null;
     }
+    
+    // Clear native PC reference
+    nativePcRef.current = null;
     
     // Stop local stream
     if (localStream) {
@@ -170,7 +174,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       }
       
       // Add tracks to peer connection
-      const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+      const pc = nativePcRef.current || (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
       console.log('[WebRTCContext] Peer ref exists:', !!peerRef.current, 'Native PC exists:', !!pc);
       
       if (pc) {
@@ -398,37 +402,25 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         setIsPairing(false);
       });
       
-      // Access native RTCPeerConnection for ICE state tracking
+      peerRef.current = peer;
+      
+      // Store reference to native RTCPeerConnection before it gets destroyed by data channel close
       const nativePc = (peer as unknown as { _pc?: RTCPeerConnection })._pc;
+      if (nativePc) {
+        nativePcRef.current = nativePc;
+        console.log('[WebRTCContext] Stored native PC reference');
+      }
       
       peer.on('close', () => {
-        console.log('[WebRTCContext] Peer close event');
-        console.log('[WebRTCContext] Native PC exists:', !!nativePc);
-        if (nativePc) {
-          console.log('[WebRTCContext] Native PC ICE state:', nativePc.iceConnectionState);
-          console.log('[WebRTCContext] Native PC connection state:', nativePc.connectionState);
-        }
-        // Don't destroy connection if ICE is still connected - this is just data channel closing
-        if (nativePc && (nativePc.iceConnectionState === 'connected' || nativePc.iceConnectionState === 'completed')) {
-          console.log('[WebRTCContext] Ignoring close event - ICE still connected');
-          return;
-        }
-        console.log('[WebRTCContext] Peer connection closed, updating state');
-        setConnectionState('closed');
+        console.log('[WebRTCContext] Peer close event - ignoring (data channel closure, not actual disconnection)');
+        // DO NOT update state - this is just the data channel closing, not the actual peer connection
+        // The real connection status is tracked by ICE state handlers below
       });
       
       peer.on('error', (err: Error) => {
-        console.error('[WebRTCContext] Peer error:', err);
-        console.log('[WebRTCContext] Native PC exists:', !!nativePc);
-        if (nativePc) {
-          console.log('[WebRTCContext] Native PC ICE state:', nativePc.iceConnectionState);
-        }
-        // Don't fail connection if ICE is still connected - this is just data channel error
-        if (nativePc && (nativePc.iceConnectionState === 'connected' || nativePc.iceConnectionState === 'completed')) {
-          console.log('[WebRTCContext] Ignoring error - ICE still connected');
-          return;
-        }
-        setConnectionState('failed');
+        console.error('[WebRTCContext] Peer error (likely data channel):', err);
+        // DO NOT fail the connection - this is just data channel error
+        // The real connection errors are tracked by ICE state handlers below
       });
       
       // Access native RTCPeerConnection for ICE state logging AND candidate publishing
