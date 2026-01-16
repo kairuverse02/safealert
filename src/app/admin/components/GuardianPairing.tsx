@@ -189,22 +189,29 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun.relay.metered.ca:80' },
           {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
+            urls: 'turn:global.relay.metered.ca:80',
+            username: 'e9f4949ce4235c5972eaed58',
+            credential: 'uHh9xgP3lNEq+sit'
           },
           {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
+            urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+            username: 'e9f4949ce4235c5972eaed58',
+            credential: 'uHh9xgP3lNEq+sit'
           },
           {
-            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
+            urls: 'turn:global.relay.metered.ca:443',
+            username: 'e9f4949ce4235c5972eaed58',
+            credential: 'uHh9xgP3lNEq+sit'
+          },
+          {
+            urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+            username: 'e9f4949ce4235c5972eaed58',
+            credential: 'uHh9xgP3lNEq+sit'
           }
-        ]
+        ],
+        iceTransportPolicy: 'all'
       }
     });
     peerRef.current = peer;
@@ -455,6 +462,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             pc.onicecandidate = async (evt: RTCPeerConnectionIceEvent) => {
               console.log('Guardian PC onicecandidate', evt?.candidate);
               if (evt?.candidate) {
+                // Log candidate type for debugging
+                console.log(`Guardian: ICE candidate type=${evt.candidate.type} protocol=${evt.candidate.protocol} address=${evt.candidate.address}`);
                 // If offer not yet published, queue the candidate
                 if (!offerPublishedRef.current) {
                   console.log('Guardian: queuing ICE candidate (offer not yet published)');
