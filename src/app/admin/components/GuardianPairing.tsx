@@ -187,7 +187,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       initiator: true,
       trickle: true,
       stream: localStream,
-      channelName: undefined, // Disable data channel - all signaling is database-based
+      channelConfig: { negotiated: true, id: 0 }, // Pre-negotiated channel prevents WebRTC from negotiating it
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },

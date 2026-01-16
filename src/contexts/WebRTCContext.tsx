@@ -312,7 +312,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         initiator: false,
         trickle: true,
         stream: undefined, // Don't send stream initially
-        channelName: undefined, // Disable data channel - we use database for signaling
+        channelConfig: { negotiated: true, id: 0 }, // Pre-negotiated channel prevents WebRTC from negotiating it
         config: {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
