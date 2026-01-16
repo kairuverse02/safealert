@@ -232,16 +232,22 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         
         // Send offer to guardian via API
         if (currentRoomId) {
-          const resp = await fetch(`/api/signaling/${currentRoomId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ offer_signal: offer }),
-          });
-          console.log('[WebRTCContext] Sent renegotiation offer:', resp.status);
-          
-          // Poll for guardian's answer
-          if (resp.ok) {
-            console.log('[WebRTCContext] Polling for guardian answer to renegotiation');
+          try {
+            const resp = await fetch(`/api/signaling/${currentRoomId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ offer_signal: offer }),
+            });
+            console.log('[WebRTCContext] Sent renegotiation offer:', resp.status);
+            
+            if (!resp.ok) {
+              const errorText = await resp.text();
+              console.error('[WebRTCContext] Failed to send renegotiation offer:', resp.status, errorText);
+            }
+            
+            // Poll for guardian's answer
+            if (resp.ok) {
+              console.log('[WebRTCContext] Polling for guardian answer to renegotiation');
             let lastAppliedAnswerSdp: string | null = null;
             if (answerPollRef.current) clearInterval(answerPollRef.current);
             
@@ -270,7 +276,14 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
                 console.warn('[WebRTCContext] Answer poll error:', e);
               }
             }, 1000);
+            } else {
+              console.error('[WebRTCContext] Cannot start answer poll - offer request was not ok');
+            }
+          } catch (e) {
+            console.error('[WebRTCContext] Error sending renegotiation offer:', e);
           }
+        } else {
+          console.error('[WebRTCContext] Cannot send renegotiation offer - no room ID');
         }
       }
       
