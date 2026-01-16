@@ -465,6 +465,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       
       // Start polling for guardian's ICE candidates since realtime may be unreliable
       let appliedCandidateCount = data?.data?.offer_signal?.candidates?.length || 0;
+      console.log('[WebRTCContext] Starting candidate poll, initial count:', appliedCandidateCount);
       const candidatePollInterval = window.setInterval(async () => {
         try {
           const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
@@ -480,6 +481,8 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           const pollResp = await fetch(`/api/signaling/${roomId}`);
           const pollData = await pollResp.json();
           const candidates = pollData?.data?.offer_signal?.candidates;
+          
+          console.log('[WebRTCContext] Candidate poll: ICE state:', iceState, 'candidates in DB:', candidates?.length || 0, 'applied:', appliedCandidateCount);
           
           if (Array.isArray(candidates) && candidates.length > appliedCandidateCount) {
             const newCandidates = candidates.slice(appliedCandidateCount);

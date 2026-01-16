@@ -34,6 +34,10 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
   const applyingAnswerRef = useRef(false);
   // Track the number of candidates already applied to avoid re-applying same candidates
   const appliedCandidateCountRef = useRef(0);
+  // Collect guardian's own ICE candidates for persisting to DB
+  const collectedCandidatesRef = useRef<RTCIceCandidate[]>([]);
+  // Track whether initial offer has been published so we know when to merge candidates
+  const offerPublishedRef = useRef(false);
   const [remoteStreamState, setRemoteStreamState] = useState<MediaStream | null>(null);
   const [showMonitoring, setShowMonitoring] = useState(false);
   const [isMuted] = useState(false);
@@ -135,6 +139,15 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
     setRoomId(id);
     if (onRoomCreated) onRoomCreated(id);
     setIsWaiting(true);
+    
+    // Reset refs for new room
+    collectedCandidatesRef.current = [];
+    offerPublishedRef.current = false;
+    appliedCandidateCountRef.current = 0;
+    hasAppliedAnswerRef.current = false;
+    lastAppliedAnswerSdpRef.current = null;
+    applyingAnswerRef.current = false;
+    hasStartedPollingRef.current = false;
 
     // Do NOT get guardian camera automatically at room creation to avoid prompting permissions.
     // The guardian can enable their local camera manually after the room is created.
@@ -215,6 +228,25 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             return;
           }
           console.log('Offer published to pairing_rooms via API', id, json?.data);
+          
+          // Mark offer as published so we can now persist candidates
+          offerPublishedRef.current = true;
+          
+          // Flush any ICE candidates that were collected before offer was published
+          if (collectedCandidatesRef.current.length > 0) {
+            console.log('Guardian: flushing', collectedCandidatesRef.current.length, 'queued ICE candidates');
+            const offerWithCandidates = {
+              ...(offer as object),
+              candidates: collectedCandidatesRef.current.map(c => c.toJSON()),
+            };
+            const updateResp = await fetch(`/api/signaling/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ offer_signal: offerWithCandidates }),
+            });
+            const updateJson = await updateResp.json().catch(() => null);
+            console.log('Guardian: flushed queued candidates response', updateResp.status, updateJson);
+          }
         } else if (answerSignal) {
           // Send answer back to dependent (for renegotiation)
           console.log('Guardian: sending answer to dependent (persisting to DB)');
@@ -402,8 +434,43 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             }
           };
 
+          // Handle ICE candidates - collect and persist them to the offer_signal
           try {
-            pc.onicecandidate = (evt: RTCPeerConnectionIceEvent) => console.log('Guardian PC onicecandidate', evt && evt.candidate);
+            pc.onicecandidate = async (evt: RTCPeerConnectionIceEvent) => {
+              console.log('Guardian PC onicecandidate', evt?.candidate);
+              if (evt?.candidate) {
+                // If offer not yet published, queue the candidate
+                if (!offerPublishedRef.current) {
+                  console.log('Guardian: queuing ICE candidate (offer not yet published)');
+                  collectedCandidatesRef.current.push(evt.candidate);
+                } else {
+                  // Offer is published, merge candidate into offer_signal
+                  console.log('Guardian: persisting ICE candidate to offer_signal');
+                  try {
+                    const resp = await fetch(`/api/signaling/${id}`);
+                    const data = await resp.json().catch(() => null);
+                    const existingOffer = data?.data?.offer_signal || {};
+                    const candidates = Array.isArray(existingOffer.candidates) ? existingOffer.candidates : [];
+                    
+                    // Add this candidate if not already present
+                    const candidateJson = evt.candidate.toJSON();
+                    if (!candidates.find((c: unknown) => JSON.stringify(c) === JSON.stringify(candidateJson))) {
+                      candidates.push(candidateJson);
+                    }
+                    
+                    const updateResp = await fetch(`/api/signaling/${id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ offer_signal: { ...existingOffer, candidates } }),
+                    });
+                    const json = await updateResp.json().catch(() => null);
+                    console.log('Guardian: persisted ICE candidate response', updateResp.status, json);
+                  } catch (err) {
+                    console.warn('Guardian: failed to persist ICE candidate', err);
+                  }
+                }
+              }
+            };
           } catch {}
 
           try {
