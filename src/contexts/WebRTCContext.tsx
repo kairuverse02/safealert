@@ -57,6 +57,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const supabase = createClient();
   const pollRef = useRef<number | null>(null);
+  const commandPollRef = useRef<number | null>(null);
 
   // Cleanup function
   const destroyConnection = useCallback(() => {
@@ -66,6 +67,12 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
+    }
+    
+    // Stop command polling
+    if (commandPollRef.current) {
+      clearInterval(commandPollRef.current);
+      commandPollRef.current = null;
     }
     
     // Unsubscribe from realtime
@@ -625,6 +632,42 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       
       // Store interval ref for cleanup
       pollRef.current = candidatePollInterval;
+      
+      // Start polling for guardian commands (in addition to realtime subscription)
+      // This ensures commands are received even if realtime subscription has issues
+      console.log('[WebRTCContext] Starting guardian command poll');
+      const commandPollInterval = window.setInterval(async () => {
+        try {
+          const pollResp = await fetch(`/api/signaling/${roomId}`);
+          const pollData = await pollResp.json();
+          const cmd = pollData?.data?.guardian_command;
+          
+          if (cmd === 'start_monitor') {
+            console.log('[WebRTCContext] Command poll: received start_monitor');
+            await startMonitoring();
+            // Clear command after executing
+            await fetch(`/api/signaling/${roomId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ guardian_command: null }),
+            });
+          } else if (cmd === 'stop_monitor') {
+            console.log('[WebRTCContext] Command poll: received stop_monitor');
+            stopMonitoring();
+            // Clear command after executing
+            await fetch(`/api/signaling/${roomId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ guardian_command: null }),
+            });
+          }
+        } catch (e) {
+          console.warn('[WebRTCContext] Command poll error:', e);
+        }
+      }, 1000); // Poll every second for commands
+      
+      // Store command poll ref for cleanup
+      commandPollRef.current = commandPollInterval;
       
     } catch (err) {
       console.error('[WebRTCContext] Pairing failed:', err);
