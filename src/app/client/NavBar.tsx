@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { signout } from '@/lib/auth-actions';
 import { Spinner } from '@/components/ui/spinner';
+import { useWebRTC } from '@/contexts/WebRTCContext';
 
 interface NavbarProps {
   user?: {
@@ -21,12 +22,23 @@ export default function Navbar({
   const router = useRouter();
   // const supabase = createClient();
   
+  // Get WebRTC context state - safely handle if not in WebRTC context
+  let webrtcContext = null;
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    webrtcContext = useWebRTC();
+  } catch {
+    // Not in WebRTC context (e.g., NavBar used outside of WebRTCProvider)
+    webrtcContext = null;
+  }
+  
   // State to track if dropdown is open or closed
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   // Pairing status (reads from localStorage.pairingRoomId)
   const [pairingId, setPairingId] = useState<string | null>(null);
   const [paired, setPaired] = useState(false);
+  const [pairing, setPairing] = useState(false);
   const [copied, setCopied] = useState(false);
 
   // Reference to the dropdown element for click outside detection
@@ -82,16 +94,27 @@ export default function Navbar({
     };
   }, [isDropdownOpen]);
 
-  // Sync pairing status with localStorage and across tabs
+  // Sync pairing status with localStorage and WebRTC context
   useEffect(() => {
     const check = (maybeId?: string | null) => {
       try {
         const id = (typeof maybeId !== 'undefined') ? maybeId : (typeof window !== 'undefined' ? window.localStorage.getItem('pairingRoomId') : null);
         setPairingId(id);
-        setPaired(Boolean(id));
+        // Check if truly paired (WebRTC context) or just in pairing state (localStorage)
+        if (webrtcContext?.isPaired) {
+          setPaired(true);
+          setPairing(false);
+        } else if (id) {
+          setPaired(false);
+          setPairing(true);
+        } else {
+          setPaired(false);
+          setPairing(false);
+        }
       } catch {
         setPairingId(null);
         setPaired(false);
+        setPairing(false);
       }
     };
 
@@ -115,7 +138,7 @@ export default function Navbar({
       window.removeEventListener('storage', onStorage);
       window.removeEventListener('pairing-changed', onPairingChanged as EventListener);
     };
-  }, []);
+  }, [webrtcContext?.isPaired]);
 
   const handleCopyPairingId = async () => {
     if (!pairingId) return;
@@ -170,6 +193,11 @@ export default function Navbar({
                 <span className="h-2 w-2 bg-green-500 rounded-full inline-block" />
                 <span title={pairingId ?? undefined}>{`Paired: ${pairingId ? pairingId.slice(0,8) : 'unknown'}`}</span>
                 <button onClick={handleCopyPairingId} aria-label="Copy pairing id" className="ml-2 text-xs text-green-700 hover:text-green-900">{copied ? 'Copied' : 'Copy'}</button>
+              </div>
+            ) : pairing ? (
+              <div className="flex items-center space-x-2 bg-blue-50 border border-blue-200 text-blue-800 px-3 py-1 rounded-full text-sm">
+                <span className="h-2 w-2 bg-blue-500 rounded-full inline-block animate-pulse" />
+                <span title={pairingId ?? undefined}>{`Pairing: ${pairingId ? pairingId.slice(0,8) : 'unknown'}`}</span>
               </div>
             ) : (
               <div className="text-sm text-gray-500">Not paired</div>
@@ -242,6 +270,17 @@ export default function Navbar({
                       >
                         {copied ? 'Copied' : 'Copy'}
                       </button>
+                    </div>
+                  </div>
+                )}
+
+                {pairing && !paired && (
+                  <div className="px-4 py-2 border-b border-gray-200 sm:hidden">
+                    <div className="flex items-center justify-between text-sm text-gray-600">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 bg-blue-500 rounded-full inline-block animate-pulse" />
+                        <span className="truncate mr-2">{pairingId ? `Pairing: ${pairingId.slice(0,8)}` : 'Pairing'}</span>
+                      </div>
                     </div>
                   </div>
                 )}

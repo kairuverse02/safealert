@@ -5,6 +5,7 @@ import { Html5QrcodeScanner } from 'html5-qrcode';
 import { useWebRTC } from '@/contexts/WebRTCContext';
 import { useSoundDetection } from '@/hooks/useSoundDetection';
 import { useAudio } from '@/hooks/useAudio';
+import { Spinner } from '@/components/ui/spinner';
 
 declare global {
   interface Window {
@@ -247,7 +248,7 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   if (isPaired) {
     return (
       <div style={styles.container}>
-        <h2 style={styles.title}>Connected</h2>
+        <h2 style={styles.title}>Connected ✓</h2>
         <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
           <div><strong>Room:</strong> {currentRoomId || '—'}</div>
           <div><strong>Status:</strong> {connectionState}</div>
@@ -351,8 +352,13 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   if (isPairing) {
     return (
       <div style={styles.container}>
-        <h2 style={styles.title}>Connecting...</h2>
-        <p>Please wait.</p>
+        <h2 style={styles.title}>Connecting to Guardian...</h2>
+        <div style={{ fontSize: 12, color: '#666', marginBottom: 16 }}>
+          <div><strong>Room:</strong> {currentRoomId || '—'}</div>
+          <div><strong>Status:</strong> {connectionState || 'Initiating'}</div>
+        </div>
+        <Spinner />
+        <p style={{ textAlign: 'center', marginTop: 12, color: '#666' }}>Waiting for guardian to connect...</p>
       </div>
     );
   }
