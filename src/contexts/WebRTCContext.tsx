@@ -310,12 +310,32 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         stream: undefined, // Don't send stream initially
         channelName: undefined, // Disable data channel - we use database for signaling
         sdpTransform: (sdp: string) => {
-          // Remove data channel m-line from SDP to prevent channel from being created
-          return sdp.split('\r\n').filter(line => 
-            !line.startsWith('m=application') && 
-            !line.startsWith('a=sctp-port') && 
-            !line.startsWith('a=max-message-size')
-          ).join('\r\n');
+          // Remove entire data channel section from SDP
+          const lines = sdp.split('\r\n');
+          const result: string[] = [];
+          let inDataChannel = false;
+          
+          for (const line of lines) {
+            if (line.startsWith('m=application')) {
+              inDataChannel = true;
+              continue;
+            }
+            if (line.startsWith('m=')) {
+              inDataChannel = false;
+            }
+            if (!inDataChannel) {
+              result.push(line);
+            }
+          }
+          
+          // Fix BUNDLE group to exclude data channel MID
+          return result.map(line => {
+            if (line.startsWith('a=group:BUNDLE')) {
+              // Remove the data channel MID (usually '2' if video=0, audio=1)
+              return line.replace(/\s+2$/, '');
+            }
+            return line;
+          }).join('\r\n');
         },
         config: {
           iceServers: [
