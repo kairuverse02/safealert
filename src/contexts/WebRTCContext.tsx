@@ -309,34 +309,6 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         trickle: true,
         stream: undefined, // Don't send stream initially
         channelName: undefined, // Disable data channel - we use database for signaling
-        sdpTransform: (sdp: string) => {
-          // Remove entire data channel section from SDP
-          const lines = sdp.split('\r\n');
-          const result: string[] = [];
-          let inDataChannel = false;
-          
-          for (const line of lines) {
-            if (line.startsWith('m=application')) {
-              inDataChannel = true;
-              continue;
-            }
-            if (line.startsWith('m=')) {
-              inDataChannel = false;
-            }
-            if (!inDataChannel) {
-              result.push(line);
-            }
-          }
-          
-          // Fix BUNDLE group to exclude data channel MID
-          return result.map(line => {
-            if (line.startsWith('a=group:BUNDLE')) {
-              // Remove the data channel MID (usually '2' if video=0, audio=1)
-              return line.replace(/\s+2$/, '');
-            }
-            return line;
-          }).join('\r\n');
-        },
         config: {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
@@ -428,12 +400,23 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       
       peer.on('close', () => {
         console.log('[WebRTCContext] Peer connection closed');
-        setConnectionState('closed');
+        // Don't update state if we're already connected/paired - this might just be data channel closing
+        // The real connection state is tracked by ICE and RTCPeerConnection state
+        if (connectionState !== 'connected') {
+          setConnectionState('closed');
+        } else {
+          console.log('[WebRTCContext] Ignoring close event - still connected via ICE');
+        }
       });
       
       peer.on('error', (err: Error) => {
         console.error('[WebRTCContext] Peer error:', err);
-        setConnectionState('failed');
+        // Don't fail the connection if it's just a data channel error and we're connected
+        if (connectionState !== 'connected') {
+          setConnectionState('failed');
+        } else {
+          console.log('[WebRTCContext] Ignoring error - connection still active');
+        }
       });
       
       // Access native RTCPeerConnection for ICE state logging AND candidate publishing
@@ -752,7 +735,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       setIsPaired(false);
       throw err;
     }
-  }, [isPairing, isPaired, startMonitoring, stopMonitoring, supabase]);
+  }, [isPairing, isPaired, startMonitoring, stopMonitoring, supabase, connectionState]);
 
   // Cleanup on unmount ONLY (no dependencies to avoid re-running)
   useEffect(() => {

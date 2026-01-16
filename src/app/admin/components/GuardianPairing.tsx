@@ -188,34 +188,6 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       trickle: true,
       stream: localStream,
       channelName: undefined, // Disable data channel - all signaling is database-based
-      sdpTransform: (sdp: string) => {
-        // Remove entire data channel section from SDP
-        const lines = sdp.split('\r\n');
-        const result: string[] = [];
-        let inDataChannel = false;
-        
-        for (const line of lines) {
-          if (line.startsWith('m=application')) {
-            inDataChannel = true;
-            continue;
-          }
-          if (line.startsWith('m=')) {
-            inDataChannel = false;
-          }
-          if (!inDataChannel) {
-            result.push(line);
-          }
-        }
-        
-        // Fix BUNDLE group to exclude data channel MID
-        return result.map(line => {
-          if (line.startsWith('a=group:BUNDLE')) {
-            // Remove the data channel MID (usually '2' if video=0, audio=1)
-            return line.replace(/\s+2$/, '');
-          }
-          return line;
-        }).join('\r\n');
-      },
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
