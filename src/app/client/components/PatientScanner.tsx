@@ -5,6 +5,7 @@ import { useWebRTC } from '@/contexts/WebRTCContext';
 import { useSoundDetection } from '@/hooks/useSoundDetection';
 import { useAudio } from '@/hooks/useAudio';
 import { Spinner } from '@/components/ui/spinner';
+import { useRouter } from 'next/navigation';
 
 declare global {
   interface Window {
@@ -18,6 +19,7 @@ interface PatientScannerProps {
 }
 
 export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
+  const router = useRouter();
   const [manualRoomId, setManualRoomId] = useState<string>(initialRoomId || '');
   const [micTestStatus, setMicTestStatus] = useState<string>('');
   
@@ -231,8 +233,13 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
     return () => window.removeEventListener('dependent-mic-test', handler as EventListener);
   }, [testMicNow]);
 
-  // Removed auto-redirect - dependent should stay on pairing page to maintain WebRTC connection
-  // and continue listening for guardian commands
+  // Redirect to dashboard when monitoring starts
+  useEffect(() => {
+    if (isPaired && isMonitoringActive && connectionState === 'connected') {
+      console.log('[PatientScanner] Monitoring active and connected, redirecting to dashboard');
+      router.push('/client/dashboard');
+    }
+  }, [isPaired, isMonitoringActive, connectionState, router]);
 
   // --- RENDER LOGIC ---
 

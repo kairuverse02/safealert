@@ -398,29 +398,31 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         setIsPairing(false);
       });
       
+      // Access native RTCPeerConnection for ICE state tracking
+      const nativePc = (peer as unknown as { _pc?: RTCPeerConnection })._pc;
+      
       peer.on('close', () => {
-        console.log('[WebRTCContext] Peer connection closed');
-        // Don't update state if we're already connected/paired - this might just be data channel closing
-        // The real connection state is tracked by ICE and RTCPeerConnection state
-        if (connectionState !== 'connected') {
-          setConnectionState('closed');
-        } else {
-          console.log('[WebRTCContext] Ignoring close event - still connected via ICE');
+        console.log('[WebRTCContext] Peer close event');
+        // Don't destroy connection if ICE is still connected - this is just data channel closing
+        if (nativePc && (nativePc.iceConnectionState === 'connected' || nativePc.iceConnectionState === 'completed')) {
+          console.log('[WebRTCContext] Ignoring close event - ICE still connected');
+          return;
         }
+        console.log('[WebRTCContext] Peer connection closed, updating state');
+        setConnectionState('closed');
       });
       
       peer.on('error', (err: Error) => {
         console.error('[WebRTCContext] Peer error:', err);
-        // Don't fail the connection if it's just a data channel error and we're connected
-        if (connectionState !== 'connected') {
-          setConnectionState('failed');
-        } else {
-          console.log('[WebRTCContext] Ignoring error - connection still active');
+        // Don't fail connection if ICE is still connected - this is just data channel error
+        if (nativePc && (nativePc.iceConnectionState === 'connected' || nativePc.iceConnectionState === 'completed')) {
+          console.log('[WebRTCContext] Ignoring error - ICE still connected');
+          return;
         }
+        setConnectionState('failed');
       });
       
       // Access native RTCPeerConnection for ICE state logging AND candidate publishing
-      const nativePc = (peer as unknown as { _pc?: RTCPeerConnection })._pc;
       if (nativePc) {
         nativePc.oniceconnectionstatechange = () => {
           const iceState = nativePc.iceConnectionState;
@@ -735,7 +737,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       setIsPaired(false);
       throw err;
     }
-  }, [isPairing, isPaired, startMonitoring, stopMonitoring, supabase, connectionState]);
+  }, [isPairing, isPaired, startMonitoring, stopMonitoring, supabase]);
 
   // Cleanup on unmount ONLY (no dependencies to avoid re-running)
   useEffect(() => {
