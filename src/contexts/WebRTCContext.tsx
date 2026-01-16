@@ -264,7 +264,25 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         stream: stream,
         channelConfig: { ordered: false },
         config: {
-          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            {
+              urls: 'turn:openrelay.metered.ca:80',
+              username: 'openrelayproject',
+              credential: 'openrelayproject'
+            },
+            {
+              urls: 'turn:openrelay.metered.ca:443',
+              username: 'openrelayproject',
+              credential: 'openrelayproject'
+            },
+            {
+              urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+              username: 'openrelayproject',
+              credential: 'openrelayproject'
+            }
+          ]
         }
       });
       
@@ -445,27 +463,46 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       const resp = await fetch(`/api/signaling/${roomId}`);
       const data = await resp.json();
       
+      // Store initial candidates to apply after remote description is set
+      const initialCandidates: RTCIceCandidateInit[] = [];
+      
       if (data?.data?.offer_signal) {
         console.log('[WebRTCContext] Found initial offer, signaling peer');
+        
+        // Extract candidates before signaling (they'll be applied after remote desc is set)
+        if (Array.isArray(data.data.offer_signal.candidates)) {
+          initialCandidates.push(...data.data.offer_signal.candidates);
+          console.log('[WebRTCContext] Found', initialCandidates.length, 'initial candidates from guardian');
+        }
+        
+        // Signal the offer (this sets the remote description)
         peer.signal(data.data.offer_signal);
         
-        // Also apply any initial ICE candidates from guardian
-        const initialCandidates = data.data.offer_signal.candidates;
-        if (Array.isArray(initialCandidates) && initialCandidates.length > 0) {
-          console.log('[WebRTCContext] Found', initialCandidates.length, 'initial candidates from guardian');
-          initialCandidates.forEach((c: RTCIceCandidateInit) => {
-            try {
-              peer.signal({ type: 'candidate', candidate: c } as Peer.SignalData);
-            } catch (e) {
-              console.warn('[WebRTCContext] Failed to signal initial candidate:', e);
-            }
-          });
-        }
+        // Wait a moment for remote description to be set, then apply candidates
+        // Using setTimeout because simple-peer's signal is async internally
+        setTimeout(() => {
+          const pc = (peer as unknown as { _pc?: RTCPeerConnection })._pc;
+          if (pc && pc.remoteDescription) {
+            console.log('[WebRTCContext] Remote description set, applying', initialCandidates.length, 'initial candidates');
+            initialCandidates.forEach((c: RTCIceCandidateInit, idx: number) => {
+              try {
+                const candidate = new RTCIceCandidate(c);
+                pc.addIceCandidate(candidate)
+                  .then(() => console.log('[WebRTCContext] Applied initial candidate', idx + 1))
+                  .catch((e: Error) => console.warn('[WebRTCContext] Failed to add initial candidate', idx + 1, e.message));
+              } catch (e) {
+                console.warn('[WebRTCContext] Failed to create initial candidate:', e);
+              }
+            });
+          } else {
+            console.warn('[WebRTCContext] Remote description not yet set, will rely on polling');
+          }
+        }, 500);
       }
       
       // Start polling for guardian's ICE candidates since realtime may be unreliable
-      let appliedCandidateCount = data?.data?.offer_signal?.candidates?.length || 0;
-      console.log('[WebRTCContext] Starting candidate poll, initial count:', appliedCandidateCount);
+      let appliedCandidateCount = 0; // Start from 0, we'll reapply if needed
+      console.log('[WebRTCContext] Starting candidate poll');
       const candidatePollInterval = window.setInterval(async () => {
         try {
           const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
@@ -478,6 +515,12 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             return;
           }
           
+          // Don't apply candidates until remote description is set
+          if (!pc?.remoteDescription) {
+            console.log('[WebRTCContext] Candidate poll: waiting for remote description');
+            return;
+          }
+          
           const pollResp = await fetch(`/api/signaling/${roomId}`);
           const pollData = await pollResp.json();
           const candidates = pollData?.data?.offer_signal?.candidates;
@@ -486,14 +529,17 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           
           if (Array.isArray(candidates) && candidates.length > appliedCandidateCount) {
             const newCandidates = candidates.slice(appliedCandidateCount);
-            console.log(`[WebRTCContext] Poll: applying ${newCandidates.length} new guardian candidates`);
-            newCandidates.forEach((c: RTCIceCandidateInit) => {
+            console.log(`[WebRTCContext] Poll: applying ${newCandidates.length} new guardian candidates via addIceCandidate`);
+            
+            for (const c of newCandidates) {
               try {
-                peerRef.current?.signal({ type: 'candidate', candidate: c } as Peer.SignalData);
+                const candidate = new RTCIceCandidate(c as RTCIceCandidateInit);
+                await pc.addIceCandidate(candidate);
+                console.log('[WebRTCContext] Poll: added candidate:', (c as RTCIceCandidateInit).candidate?.substring(0, 50));
               } catch (e) {
-                console.warn('[WebRTCContext] Failed to signal polled candidate:', e);
+                console.warn('[WebRTCContext] Failed to add polled candidate:', e);
               }
-            });
+            }
             appliedCandidateCount = candidates.length;
           }
         } catch (e) {
