@@ -188,6 +188,14 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       trickle: true,
       stream: localStream,
       channelName: undefined, // Disable data channel - all signaling is database-based
+      sdpTransform: (sdp: string) => {
+        // Remove data channel m-line from SDP to prevent channel from being created
+        return sdp.split('\r\n').filter(line => 
+          !line.startsWith('m=application') && 
+          !line.startsWith('a=sctp-port') && 
+          !line.startsWith('a=max-message-size')
+        ).join('\r\n');
+      },
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
