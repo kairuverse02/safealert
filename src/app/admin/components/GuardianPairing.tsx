@@ -571,6 +571,11 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                     console.warn('Guardian: failed to add recv transceiver (realtime)', e);
                   }
 
+                  // CRITICAL: Actually signal the answer to the peer connection!
+                  peerRef.current.signal(answer as Peer.SignalData);
+                  hasAppliedAnswerRef.current = true;
+                  if (sdp) lastAppliedAnswerSdpRef.current = sdp;
+                  console.log('Guardian: answer signaled to peer via realtime');
                 } catch (e) {
                   console.warn('Failed to signal full answer via realtime', e);
                 } finally {

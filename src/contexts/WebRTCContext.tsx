@@ -286,11 +286,17 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             console.error('[WebRTCContext] Failed to publish answer:', e);
           }
         } else if ((data as { candidate?: unknown }).candidate) {
+          // Send ICE candidates via PATCH, merging into answer_signal
           try {
             const resp = await fetch(`/api/signaling/${roomId}`, {
-              method: 'POST',
+              method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ candidate: data }),
+              body: JSON.stringify({ 
+                answer_signal: { 
+                  type: 'candidate', 
+                  candidate: (data as { candidate: unknown }).candidate 
+                } 
+              }),
             });
             console.log('[WebRTCContext] Published candidate:', resp.status);
           } catch (e) {
