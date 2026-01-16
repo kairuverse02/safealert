@@ -329,7 +329,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         setConnectionState('failed');
       });
       
-      // Access native RTCPeerConnection for ICE state logging
+      // Access native RTCPeerConnection for ICE state logging AND candidate publishing
       const nativePc = (peer as unknown as { _pc?: RTCPeerConnection })._pc;
       if (nativePc) {
         nativePc.oniceconnectionstatechange = () => {
@@ -341,9 +341,31 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         nativePc.onicegatheringstatechange = () => {
           console.log('[WebRTCContext] Dependent ICE gathering state:', nativePc.iceGatheringState);
         };
-        nativePc.onicecandidate = (evt) => {
+        // CRITICAL: Actually publish ICE candidates to the database for Guardian to receive
+        nativePc.onicecandidate = async (evt) => {
           if (evt.candidate) {
             console.log('[WebRTCContext] Dependent ICE candidate generated: type=', evt.candidate.type, 'protocol=', evt.candidate.protocol);
+            // Publish the candidate to the database
+            try {
+              const candidateInit: RTCIceCandidateInit = {
+                candidate: evt.candidate.candidate,
+                sdpMid: evt.candidate.sdpMid,
+                sdpMLineIndex: evt.candidate.sdpMLineIndex,
+              };
+              const resp = await fetch(`/api/signaling/${roomId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  answer_signal: {
+                    type: 'candidate',
+                    candidate: candidateInit
+                  }
+                }),
+              });
+              console.log('[WebRTCContext] Published dependent candidate:', resp.status, 'type=', evt.candidate.type);
+            } catch (e) {
+              console.warn('[WebRTCContext] Failed to publish dependent candidate:', e);
+            }
           }
         };
       }

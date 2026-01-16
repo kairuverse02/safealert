@@ -343,21 +343,28 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                       applyingAnswerRef.current = false;
                     }
                   } else {
-                    console.log('Guardian: polled answer SDP already applied or is being applied, will process candidates only', ans.candidates || ans.candidate);
+                    console.log('Guardian: polled answer SDP already applied or is being applied, will process candidates only', ans.candidates?.length || 0, 'candidates');
                   }
 
                   // Also apply any NEW candidates included in the update (skip already-applied ones)
-                  const candidates = ans.candidates || ans.candidate ? (ans.candidates || [ans.candidate]) : [];
+                  const candidates = ans.candidates || (ans.candidate ? [ans.candidate] : []);
+                  console.log('Guardian: answer_signal candidates array:', candidates.length, 'items, already applied:', appliedCandidateCountRef.current);
                   if (Array.isArray(candidates) && candidates.length > appliedCandidateCountRef.current) {
                     const newCandidates = candidates.slice(appliedCandidateCountRef.current);
-                    console.log(`Guardian: applying ${newCandidates.length} new candidates (total: ${candidates.length}, already applied: ${appliedCandidateCountRef.current})`);
-                    (newCandidates as RTCIceCandidateInit[]).forEach((c) => {
-                      try {
-                        peerRef.current?.signal({ type: 'candidate', candidate: c as unknown as RTCIceCandidate });
-                      } catch (e) {
-                        console.warn('Failed to signal candidate from poll', e);
+                    console.log(`Guardian: applying ${newCandidates.length} new dependent candidates via addIceCandidate`);
+                    const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+                    if (pc && pc.remoteDescription) {
+                      for (const c of newCandidates as RTCIceCandidateInit[]) {
+                        try {
+                          await pc.addIceCandidate(new RTCIceCandidate(c));
+                          console.log('Guardian: applied dependent candidate:', c.candidate?.substring(0, 60));
+                        } catch (e) {
+                          console.warn('Guardian: failed to add dependent candidate:', e);
+                        }
                       }
-                    });
+                    } else {
+                      console.warn('Guardian: cannot apply candidates - no PC or remote description not set');
+                    }
                     appliedCandidateCountRef.current = candidates.length;
                   }
 
