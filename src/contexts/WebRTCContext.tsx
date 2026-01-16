@@ -178,21 +178,36 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       console.log('[WebRTCContext] Peer ref exists:', !!peerRef.current, 'Native PC exists:', !!pc);
       
       if (pc) {
+        console.log('[WebRTCContext] PC signaling state:', pc.signalingState, 'connection state:', pc.connectionState);
+        
+        // Check if PC is closed
+        if (pc.signalingState === 'closed') {
+          console.error('[WebRTCContext] Cannot add tracks - PC is closed before we could start');
+          return;
+        }
+        
         console.log('[WebRTCContext] Adding tracks to peer connection...');
         
         // Wait for stable connection state
         if (pc.signalingState !== 'stable') {
-          console.log('[WebRTCContext] Waiting for stable signaling state...');
+          console.log('[WebRTCContext] Waiting for stable signaling state..., current:', pc.signalingState);
           await new Promise<void>((resolve) => {
             let attempts = 0;
             const check = setInterval(() => {
               attempts++;
-              if (pc.signalingState === 'stable' || attempts >= 100) {
+              console.log('[WebRTCContext] Signaling state check attempt', attempts, ':', pc.signalingState);
+              if (pc.signalingState === 'stable' || pc.signalingState === 'closed' || attempts >= 100) {
                 clearInterval(check);
                 resolve();
               }
             }, 100);
           });
+          
+          // Recheck after waiting
+          if (pc.signalingState === 'closed') {
+            console.error('[WebRTCContext] PC closed while waiting for stable state');
+            return;
+          }
         }
         
         // Add tracks
