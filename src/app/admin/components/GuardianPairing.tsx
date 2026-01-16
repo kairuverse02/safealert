@@ -27,6 +27,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
   const remoteStreamRef = useRef<MediaStream | null>(null); // Accumulate all remote tracks here
   const answerPollRef = useRef<number | null>(null); // interval id for polling answer as a fallback
   const hasStartedPollingRef = useRef(false);
+  const renegotiationPollRef = useRef<number | null>(null); // Poll for renegotiation offers from dependent
   // Track whether an answer SDP has already been applied to avoid duplicate signaling
   const hasAppliedAnswerRef = useRef(false);
   const lastAppliedAnswerSdpRef = useRef<string | null>(null);
@@ -409,6 +410,42 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                     if (answerPollRef.current) {
                       clearInterval(answerPollRef.current);
                       answerPollRef.current = null;
+                    }                    
+                    // Start polling for renegotiation offers from dependent
+                    if (!renegotiationPollRef.current) {
+                      console.log('Guardian: Starting renegotiation offer poll');
+                      renegotiationPollRef.current = window.setInterval(async () => {
+                        try {
+                          const resp = await fetch(`/api/signaling/${id}`);
+                          const data = await resp.json().catch(() => null);
+                          const newOffer = data?.data?.offer_signal;
+                          
+                          if (newOffer && newOffer.type === 'offer' && peerRef.current) {
+                            console.log('Guardian: received renegotiation offer, signaling peer');
+                            peerRef.current.signal(newOffer);
+                          }
+                        } catch (e) {
+                          console.warn('Guardian: renegotiation poll error', e);
+                        }
+                      }, 1000);
+                    }                    
+                    // Start polling for renegotiation offers from dependent
+                    if (!renegotiationPollRef.current) {
+                      console.log('Guardian: Starting renegotiation offer poll');
+                      renegotiationPollRef.current = window.setInterval(async () => {
+                        try {
+                          const resp = await fetch(`/api/signaling/${id}`);
+                          const data = await resp.json().catch(() => null);
+                          const newOffer = data?.data?.offer_signal;
+                          
+                          if (newOffer && newOffer.type === 'offer' && peerRef.current) {
+                            console.log('Guardian: received renegotiation offer, signaling peer');
+                            peerRef.current.signal(newOffer);
+                          }
+                        } catch (e) {
+                          console.warn('Guardian: renegotiation poll error', e);
+                        }
+                      }, 1000);
                     }
                   }
                 } else {
@@ -874,6 +911,10 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       if (answerPollRef.current) {
         clearInterval(answerPollRef.current);
         answerPollRef.current = null;
+      }
+      if (renegotiationPollRef.current) {
+        clearInterval(renegotiationPollRef.current);
+        renegotiationPollRef.current = null;
       }
       cleanup();
     };
