@@ -403,6 +403,11 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       
       peer.on('close', () => {
         console.log('[WebRTCContext] Peer close event');
+        console.log('[WebRTCContext] Native PC exists:', !!nativePc);
+        if (nativePc) {
+          console.log('[WebRTCContext] Native PC ICE state:', nativePc.iceConnectionState);
+          console.log('[WebRTCContext] Native PC connection state:', nativePc.connectionState);
+        }
         // Don't destroy connection if ICE is still connected - this is just data channel closing
         if (nativePc && (nativePc.iceConnectionState === 'connected' || nativePc.iceConnectionState === 'completed')) {
           console.log('[WebRTCContext] Ignoring close event - ICE still connected');
@@ -414,6 +419,10 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       
       peer.on('error', (err: Error) => {
         console.error('[WebRTCContext] Peer error:', err);
+        console.log('[WebRTCContext] Native PC exists:', !!nativePc);
+        if (nativePc) {
+          console.log('[WebRTCContext] Native PC ICE state:', nativePc.iceConnectionState);
+        }
         // Don't fail connection if ICE is still connected - this is just data channel error
         if (nativePc && (nativePc.iceConnectionState === 'connected' || nativePc.iceConnectionState === 'completed')) {
           console.log('[WebRTCContext] Ignoring error - ICE still connected');
