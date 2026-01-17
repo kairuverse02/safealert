@@ -221,52 +221,35 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         }
       }
       
-      // CRITICAL: Reuse existing transceivers, don't create duplicates
-      // Look for transceivers by checking the m-lines in the current local SDP
-      // This is more reliable than checking track existence (recv-only transceivers have no tracks yet)
+      // CRITICAL: Reuse existing transceivers by kind, don't create duplicates
       const streamTracks = stream.getTracks();
       console.log(`[WebRTCContext] Ensuring transceivers exist for ${streamTracks.length} track(s)`);
       
-      // Get the current SDP to see what m-lines already exist
-      // CRITICAL: Only count ACTIVE m-lines (not disabled ones with port 9)
-      const currentSdp = pc.localDescription?.sdp || '';
-      const existingMlinesByKind: Record<string, boolean> = { video: false, audio: false };
-      currentSdp.split('\r\n').forEach(line => {
-        // Only count m-lines with real ports (not port 9 which means disabled/ghost)
-        if (line.startsWith('m=video ') && !line.startsWith('m=video 9 ')) existingMlinesByKind.video = true;
-        if (line.startsWith('m=audio ') && !line.startsWith('m=audio 9 ')) existingMlinesByKind.audio = true;
+      // Get all existing transceivers grouped by kind
+      const existingTransceivers = pc.getTransceivers();
+      const transceiversByKind: Record<string, RTCRtpTransceiver> = {};
+      existingTransceivers.forEach(t => {
+        const kind = t.sender?.track?.kind || t.receiver?.track?.kind;
+        if (kind && !transceiversByKind[kind]) {
+          transceiversByKind[kind] = t;
+        }
       });
-      console.log(`[WebRTCContext] Existing ACTIVE m-lines in SDP:`, existingMlinesByKind);
+      console.log(`[WebRTCContext] Existing transceivers by kind:`, Object.keys(transceiversByKind));
       
       for (const track of streamTracks) {
-        if (existingMlinesByKind[track.kind]) {
-          // This kind already has an m-line, find and reuse its transceiver
-          const transceiver = pc.getTransceivers().find(t => {
-            const receiverKind = t.receiver?.track?.kind;
-            const senderKind = t.sender?.track?.kind;
-            return receiverKind === track.kind || senderKind === track.kind;
-          });
-          
-          if (transceiver) {
-            console.log(`[WebRTCContext] Reusing existing transceiver for ${track.kind}`);
-          } else {
-            console.warn(`[WebRTCContext] Expected transceiver for ${track.kind} but not found - creating new one`);
-            pc.addTransceiver(track, {
-              direction: 'sendrecv',
-              sendEncodings: track.kind === 'video' 
-                ? [{ maxBitrate: 2500000 }] 
-                : undefined
-            });
-          }
+        if (transceiversByKind[track.kind]) {
+          // Reuse existing transceiver for this kind
+          console.log(`[WebRTCContext] Reusing existing transceiver for ${track.kind}`);
         } else {
-          // No m-line yet for this kind, create transceiver
-          console.log(`[WebRTCContext] Creating new transceiver for ${track.kind} (no existing m-line)`);
-          pc.addTransceiver(track, {
+          // No transceiver for this kind yet, create one
+          console.log(`[WebRTCContext] Creating new transceiver for ${track.kind} (first time)`);
+          const newTransceiver = pc.addTransceiver(track, {
             direction: 'sendrecv',
             sendEncodings: track.kind === 'video' 
               ? [{ maxBitrate: 2500000 }] 
               : undefined
           });
+          transceiversByKind[track.kind] = newTransceiver;
         }
       }
       
@@ -275,10 +258,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       console.log(`[WebRTCContext] Replacing tracks on ${transceivers.length} transceiver(s)`);
       
       for (const track of streamTracks) {
-        const transceiver = transceivers.find(t => 
-          (t.receiver?.track?.kind === track.kind) || 
-          (t.sender?.track?.kind === track.kind)
-        );
+        const transceiver = transceiversByKind[track.kind];
         
         if (transceiver && transceiver.sender) {
           console.log(`[WebRTCContext] Replacing ${track.kind} track on transceiver`);
