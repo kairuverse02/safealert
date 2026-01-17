@@ -373,13 +373,20 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           });
         }
         
-        // WORKAROUND: Force direction re-assignment to trigger SDP regeneration
-        // Some browsers don't regenerate SDP if state changed asynchronously
-        console.log('[WebRTCContext] Force-refreshing transceiver directions before offer creation...');
+        // CRITICAL WORKAROUND: Force SDP regeneration by toggling direction
+        // Browser may cache SDP if direction was just set, so force it through inactive state
+        console.log('[WebRTCContext] Force-triggering SDP regeneration via direction toggle...');
         mediaTransceivers.forEach(t => {
           const oldDir = t.direction;
+          t.direction = 'inactive';
+          console.log(`  [Inactive] transceiver direction=${oldDir} → inactive (preparing for sendrecv)`);
+        });
+        
+        // Immediately set back to sendrecv to trigger regeneration
+        console.log('[WebRTCContext] Setting transceivers back to sendrecv...');
+        mediaTransceivers.forEach(t => {
           t.direction = 'sendrecv';
-          console.log(`  [Force-refresh] transceiver direction=${oldDir} → ${t.direction}`);
+          console.log(`  [Reset] transceiver direction=inactive → sendrecv (triggering SDP regeneration)`);
         });
         
         // Create and send renegotiation offer
