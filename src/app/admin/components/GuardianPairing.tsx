@@ -624,7 +624,9 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                   const transceivers = pc.getTransceivers();
                   transceivers.forEach((t, idx) => {
                     if (t.receiver.track?.id === track.id) {
-                      console.log(`[Guardian] Video transceiver ${idx} state: transport=${t.receiver.transport?.state} dtls=${t.receiver.transport?.iceTransport?.state}`);
+                      const receiverTransport = t.receiver.transport;
+                      const iceTransport = receiverTransport?.iceTransport;
+                      console.log(`[Guardian] Video transceiver ${idx} state: receiver.transport=${receiverTransport?.state} ice=${iceTransport?.state} iceGatheringState=${iceTransport?.gatheringState}`);
                     }
                   });
                   
@@ -635,15 +637,33 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                     }
                     try {
                       const stats = await pc.getStats(track);
+                      let foundInboundRtp = false;
+                      
                       stats.forEach((report: RTCStatsReport) => {
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         const r = report as any;
                         if (r.type === 'inbound-rtp' && r.kind === 'video') {
-                          console.log(`[Guardian] Video receive stats: ${r.framesReceived || 0} frames received, ${r.bytesReceived || 0} bytes, ${r.framesPerSecond || 0} fps, ${r.framesDecoded || 0} decoded, bytesSent=${r.bytesSent || 0}`);
+                          foundInboundRtp = true;
+                          console.log(`[Guardian] Video receive stats: ${r.framesReceived || 0} frames received, ${r.bytesReceived || 0} bytes, ${r.framesPerSecond || 0} fps, ${r.framesDecoded || 0} decoded`);
+                          
+                          // Check transport state from inbound-rtp stats
+                          if (r.transportId) {
+                            stats.forEach((transportReport: RTCStatsReport) => {
+                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                              const tr = transportReport as any;
+                              if (tr.id === r.transportId && tr.type === 'transport') {
+                                console.log(`[Guardian] RTP transport state: dtlsState=${tr.dtlsState} iceState=${tr.iceState} selectedCandidatePairId=${tr.selectedCandidatePairId}`);
+                              }
+                            });
+                          }
                         } else if (r.type === 'candidate-pair' && r.state === 'succeeded') {
                           console.log(`[Guardian] RTP candidate pair: state=${r.state} currentRoundTripTime=${r.currentRoundTripTime} availableOutgoingBitrate=${r.availableOutgoingBitrate}`);
                         }
                       });
+                      
+                      if (!foundInboundRtp) {
+                        console.warn('[Guardian] No inbound-rtp stats found - RTP may not be flowing');
+                      }
                     } catch (e) {
                       console.warn('[Guardian] Failed to get stats:', e);
                     }

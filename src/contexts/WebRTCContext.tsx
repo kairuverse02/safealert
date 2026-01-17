@@ -313,6 +313,15 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
                     const transceivers = pc.getTransceivers();
                     transceivers.forEach((t, idx) => {
                       console.log(`[WebRTCContext] Transceiver ${idx}: mid=${t.mid} sender.kind=${t.sender.track?.kind} sender.track=${!!t.sender.track} receiver.kind=${t.receiver.track?.kind}`);
+                      
+                      // Check RTP sender transport state
+                      const sender = t.sender;
+                      console.log(`[WebRTCContext] Transceiver ${idx} sender state: transport=${sender.transport?.state}`);
+                      
+                      // Check if sender has active parameters
+                      if (sender.track) {
+                        console.log(`[WebRTCContext] Transceiver ${idx} track: kind=${sender.track.kind} enabled=${sender.track.enabled} readyState=${sender.track.readyState} muted=${sender.track.muted}`);
+                      }
                     });
                     
                     // Stop polling after receiving answer
