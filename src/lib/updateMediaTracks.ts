@@ -21,7 +21,7 @@ export function updateMediaTracks(
   const videoTrack = videoTracks.length > 0 ? videoTracks[0] : null;
   
   const videoTransceiver = existingTransceivers.find(
-    (t) => t.media === 'video' || (t.sender.track?.kind === 'video')
+    (t) => t.sender.track?.kind === 'video' || t.receiver.track?.kind === 'video'
   );
 
   if (videoTransceiver) {
@@ -45,7 +45,7 @@ export function updateMediaTracks(
   const audioTrack = audioTracks.length > 0 ? audioTracks[0] : null;
 
   const audioTransceiver = existingTransceivers.find(
-    (t) => t.media === 'audio' || (t.sender.track?.kind === 'audio')
+    (t) => t.sender.track?.kind === 'audio' || t.receiver.track?.kind === 'audio'
   );
 
   if (audioTransceiver) {
