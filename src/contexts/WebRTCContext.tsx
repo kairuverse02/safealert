@@ -221,170 +221,72 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         }
       }
       
-      // CRITICAL: Remove any application/datachannel transceivers before adding media tracks
-      // This ensures audio/video m-lines come before datachannel m-line in the offer
-      const allExistingTransceivers = pc.getTransceivers();
-      for (const t of allExistingTransceivers) {
-        // Remove datachannel transceivers - they interfere with media m-line ordering
-        if (!t.sender?.track && !t.receiver?.track && t.direction === 'recvonly') {
-          console.log('[WebRTCContext] Removing unused recvonly transceiver to prevent m-line ordering issues');
-          try {
-            t.direction = 'inactive';
-          } catch (e) {
-            console.warn('[WebRTCContext] Could not set recvonly transceiver to inactive:', e);
-          }
-        }
-      }
+      // --- START OF FIX ---
       
-      // CRITICAL: Reuse existing transceivers by kind, don't create duplicates
+      // CRITICAL: Manage transceivers to prevent "Ghost" m-lines
+      // We want exactly 1 active transceiver per track kind (audio/video)
       const streamTracks = stream.getTracks();
-      console.log(`[WebRTCContext] Ensuring transceivers exist for ${streamTracks.length} track(s)`);
-      
-      // Get all existing transceivers grouped by kind
       const existingTransceivers = pc.getTransceivers();
-      const transceiversByKind: Record<string, RTCRtpTransceiver> = {};
+      
+      // 1. Group existing transceivers by kind
+      const transceiversByKind: Record<string, RTCRtpTransceiver[]> = {
+        video: [],
+        audio: []
+      };
+      
       existingTransceivers.forEach(t => {
+        // Identify kind from sender or receiver
         const kind = t.sender?.track?.kind || t.receiver?.track?.kind;
-        if (kind && !transceiversByKind[kind]) {
-          transceiversByKind[kind] = t;
+        if (kind === 'video' || kind === 'audio') {
+          transceiversByKind[kind].push(t);
         }
       });
-      console.log(`[WebRTCContext] Existing transceivers by kind:`, Object.keys(transceiversByKind));
-      
+
+      // 2. Assign tracks to the FIRST transceiver of each kind and STOP duplicates
       for (const track of streamTracks) {
-        if (transceiversByKind[track.kind]) {
-          // Reuse existing transceiver for this kind
-          console.log(`[WebRTCContext] Reusing existing transceiver for ${track.kind}`);
-          // Ensure it's in sendrecv mode
-          const existing = transceiversByKind[track.kind];
-          if (existing.direction !== 'sendrecv') {
-            existing.direction = 'sendrecv';
-            console.log(`[WebRTCContext] Activated existing ${track.kind} transceiver to sendrecv`);
-          }
-        } else {
-          // No transceiver for this kind yet, create one
-          console.log(`[WebRTCContext] Creating new transceiver for ${track.kind} (first time)`);
-          const newTransceiver = pc.addTransceiver(track, {
-            direction: 'sendrecv',
-            sendEncodings: track.kind === 'video' 
-              ? [{ maxBitrate: 2500000 }] 
-              : undefined
-          });
-          // CRITICAL: Force direction immediately after creation
-          newTransceiver.direction = 'sendrecv';
-          console.log(`[WebRTCContext] Created and activated ${track.kind} transceiver to sendrecv`);
-          transceiversByKind[track.kind] = newTransceiver;
-        }
-      }
-      
-      // Now replace tracks on the transceivers we just ensured exist
-      const transceivers = pc.getTransceivers();
-      console.log(`[WebRTCContext] Replacing tracks on ${transceivers.length} transceiver(s)`);
-      
-      for (const track of streamTracks) {
-        const transceiver = transceiversByKind[track.kind];
+        const kind = track.kind as 'video' | 'audio';
+        const availableTransceivers = transceiversByKind[kind];
         
-        if (transceiver && transceiver.sender) {
-          console.log(`[WebRTCContext] Replacing ${track.kind} track on transceiver`);
+        if (availableTransceivers && availableTransceivers.length > 0) {
+          // REUSE: Pick the first one
+          const transceiverToUse = availableTransceivers[0];
+          console.log(`[WebRTCContext] Reusing existing ${kind} transceiver (mid=${transceiverToUse.mid})`);
           
-          // CRITICAL: Ensure direction is sendrecv BEFORE replacing track
-          if (transceiver.direction !== 'sendrecv') {
-            transceiver.direction = 'sendrecv';
-            console.log(`[WebRTCContext] Pre-replaceTrack: Set ${track.kind} transceiver to sendrecv`);
-          }
+          await transceiverToUse.sender.replaceTrack(track);
+          transceiverToUse.direction = 'sendrecv';
           
-          await transceiver.sender.replaceTrack(track);
-          
-          // CRITICAL: Reinforce direction after replaceTrack
-          transceiver.direction = 'sendrecv';
-          console.log(`[WebRTCContext] Post-replaceTrack: Reinforced ${track.kind} transceiver direction to sendrecv`);
-          
-          if (track.kind === 'video') {
-            const settings = track.getSettings();
-            console.log(`[WebRTCContext] Video track: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
-            
-            // Monitor video send stats
-            const statsInterval = setInterval(async () => {
-              if (track.readyState !== 'live') {
-                clearInterval(statsInterval);
-                return;
-              }
-              try {
-                const stats = await pc.getStats(track);
-                stats.forEach((report) => {
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  const r = report as any;
-                  if (r.type === 'outbound-rtp' && r.kind === 'video') {
-                    console.log(`[WebRTCContext] Video send stats: ${r.framesSent || 0} frames sent, ${r.bytesSent || 0} bytes, ${r.framesPerSecond || 0} fps`);
-                  }
-                });
-              } catch (e) {
-                console.warn('[WebRTCContext] Failed to get stats:', e);
-              }
-            }, 3000);
+          // CLEANUP: Stop any *extra* transceivers of this kind to prevent duplicate m-lines
+          for (let i = 1; i < availableTransceivers.length; i++) {
+            const t = availableTransceivers[i];
+            if (t.direction !== 'stopped') {
+              console.log(`[WebRTCContext] Stopping duplicate ${kind} transceiver (mid=${t.mid})`);
+              t.stop(); // This effectively removes it from the active negotiation or rejects the m-line
+            }
           }
         } else {
-          console.warn(`[WebRTCContext] Failed to find/create transceiver for ${track.kind} track`);
+          // CREATE: No existing transceiver found, make a new one
+          console.log(`[WebRTCContext] Creating new transceiver for ${kind}`);
+          const newT = pc.addTransceiver(track, {
+            direction: 'sendrecv',
+            sendEncodings: kind === 'video' ? [{ maxBitrate: 2500000 }] : undefined
+          });
+          newT.direction = 'sendrecv';
         }
       }
-      
-      // Log final transceiver state
-      console.log('[WebRTCContext] Transceiver state after replaceTrack():');
-      transceivers.forEach((t, i) => {
-        const kind = t.sender.track?.kind || t.receiver.track?.kind;
-        console.log(`  Transceiver ${i} (${kind}): direction=${t.direction}, mid=${t.mid}, sender.track=${!!t.sender.track}, receiver.track=${!!t.receiver.track}`);
-      });
+      // --- END OF FIX ---
       
       // Create renegotiation offer
       console.log('[WebRTCContext] Creating renegotiation offer...');
       
-      // CRITICAL: Ensure transceivers with actual tracks are in sendrecv before createOffer
-      // Only include transceivers that have tracks (not the ghost recv-only ones)
-      const allTransceivers = pc.getTransceivers();
-      console.log('[WebRTCContext] Ensuring active transceivers are sendrecv before createOffer. Count:', allTransceivers.length);
-      for (const transceiver of allTransceivers) {
-        // Only modify transceivers that have actual tracks (sender or receiver)
-        const hasTrack = !!transceiver.sender?.track || !!transceiver.receiver?.track;
-        if (hasTrack) {
-          if (transceiver.direction !== 'sendrecv') {
-            const oldDirection = transceiver.direction;
-            transceiver.direction = 'sendrecv';
-            console.log(`[WebRTCContext] Updated transceiver to sendrecv (was ${oldDirection})`);
-          }
-          // EXTRA: Log sender/receiver state
-          console.log(`[WebRTCContext] Transceiver state before offer: mid=${transceiver.mid}, direction=${transceiver.direction}, sender=${!!transceiver.sender?.track}, receiver=${!!transceiver.receiver?.track}`);
-        }
-      }
+      const offer = await pc.createOffer();
       
-      let offer = await pc.createOffer();
-      let attemptCount = 0;
-      const maxAttempts = 10;
+      // CRITICAL: Do NOT retry with direction cycling - it breaks m-line stability
+      // The m-line order must remain constant across renegotiations.
+      // If audio m-line is stuck at port 9, it's a transceiver activation issue
+      // that will be resolved naturally by the browser when the track is truly active.
       
-      while (attemptCount < maxAttempts && offer.sdp && offer.sdp.includes('m=audio 9')) {
-        attemptCount++;
-        console.warn(`[WebRTCContext] Audio m-line stuck at port 9 (attempt ${attemptCount}/${maxAttempts}), forcing transceiver states...`);
-        
-        // Force transceivers to be truly active
-        for (const t of pc.getTransceivers()) {
-          const hasTrack = !!t.sender?.track || !!t.receiver?.track;
-          if (hasTrack) {
-            // Set direction twice with a small delay to force state update
-            t.direction = 'recvonly';
-            await new Promise(resolve => setTimeout(resolve, 10));
-            t.direction = 'sendrecv';
-            const kind = t.sender?.track?.kind || t.receiver?.track?.kind || 'unknown';
-            console.log(`[WebRTCContext] Retry ${attemptCount}: Force cycled ${kind} transceiver direction`);
-          }
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 50));
-        offer = await pc.createOffer();
-      }
-      
-      if (attemptCount > 0 && attemptCount < maxAttempts) {
-        console.log(`[WebRTCContext] ✅ Audio m-line regenerated after ${attemptCount} attempt(s)`);
-      } else if (attemptCount >= maxAttempts) {
-        console.error('[WebRTCContext] ❌ Audio m-line still port 9 after max attempts, proceeding anyway');
+      if (offer.sdp && offer.sdp.includes('m=audio 9')) {
+        console.warn('[WebRTCContext] ⚠️ Audio m-line at port 9 in renegotiation offer, but proceeding to maintain m-line stability');
       }
       
       if (offer.sdp) {
