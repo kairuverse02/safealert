@@ -216,46 +216,63 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         }
       }
       
-      // Add tracks via addTrack() - this will preserve m-line order for renegotiation
-      const tracksToAdd = stream.getTracks();
-      console.log(`[WebRTCContext] Adding ${tracksToAdd.length} tracks:`, tracksToAdd.map(t => `${t.kind}(${t.id})`).join(', '));
-      
-      tracksToAdd.forEach((track) => {
-        pc.addTrack(track, stream);
-        if (track.kind === 'video') {
-          const settings = track.getSettings();
-          console.log(`[WebRTCContext] Video track: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
-          
-          // Monitor video send stats
-          const statsInterval = setInterval(async () => {
-            if (track.readyState !== 'live') {
-              clearInterval(statsInterval);
-              return;
-            }
-            try {
-              const stats = await pc.getStats(track);
-              stats.forEach((report) => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const r = report as any;
-                if (r.type === 'outbound-rtp' && r.kind === 'video') {
-                  console.log(`[WebRTCContext] Video send stats: ${r.framesSent || 0} frames sent, ${r.bytesSent || 0} bytes, ${r.framesPerSecond || 0} fps`);
-                }
-              });
-            } catch (e) {
-              console.warn('[WebRTCContext] Failed to get stats:', e);
-            }
-          }, 3000);
-        }
-      });
-      
-      // Wait for transceivers to be created
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
+      // Use existing transceivers and replace their tracks to enable sending
+      // This avoids creating new m-lines which would violate WebRTC renegotiation rules
       const transceivers = pc.getTransceivers();
-      console.log('[WebRTCContext] Transceiver state after addTrack():');
+      const streamTracks = stream.getTracks();
+      console.log(`[WebRTCContext] Replacing tracks on ${streamTracks.length} existing transceiver(s)`);
+      
+      for (const track of streamTracks) {
+        const transceiver = transceivers.find(t => 
+          (t.receiver?.track?.kind === track.kind) || 
+          (t.sender?.track?.kind === track.kind)
+        );
+        
+        if (transceiver) {
+          console.log(`[WebRTCContext] Replacing ${track.kind} track on transceiver`);
+          await transceiver.sender.replaceTrack(track);
+          
+          // Ensure direction is set to sendrecv to enable transmission
+          if (transceiver.direction !== 'sendrecv') {
+            transceiver.direction = 'sendrecv';
+            console.log(`[WebRTCContext] Set transceiver direction to sendrecv for ${track.kind}`);
+          }
+          
+          if (track.kind === 'video') {
+            const settings = track.getSettings();
+            console.log(`[WebRTCContext] Video track: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
+            
+            // Monitor video send stats
+            const statsInterval = setInterval(async () => {
+              if (track.readyState !== 'live') {
+                clearInterval(statsInterval);
+                return;
+              }
+              try {
+                const stats = await pc.getStats(track);
+                stats.forEach((report) => {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const r = report as any;
+                  if (r.type === 'outbound-rtp' && r.kind === 'video') {
+                    console.log(`[WebRTCContext] Video send stats: ${r.framesSent || 0} frames sent, ${r.bytesSent || 0} bytes, ${r.framesPerSecond || 0} fps`);
+                  }
+                });
+              } catch (e) {
+                console.warn('[WebRTCContext] Failed to get stats:', e);
+              }
+            }, 3000);
+          }
+        } else {
+          console.warn(`[WebRTCContext] No transceiver found for ${track.kind} track, falling back to addTrack()`);
+          pc.addTrack(track, stream);
+        }
+      }
+      
+      // Log final transceiver state
+      console.log('[WebRTCContext] Transceiver state after replaceTrack():');
       transceivers.forEach((t, i) => {
         const kind = t.sender.track?.kind || t.receiver.track?.kind;
-        console.log(`  Transceiver ${i} (${kind}): direction=${t.direction}, mid=${t.mid}, sender.track=${!!t.sender.track}`);
+        console.log(`  Transceiver ${i} (${kind}): direction=${t.direction}, mid=${t.mid}, sender.track=${!!t.sender.track}, receiver.track=${!!t.receiver.track}`);
       });
       
       // Create renegotiation offer
