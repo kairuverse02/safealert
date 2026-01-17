@@ -331,19 +331,38 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           // Send answer back to dependent (for renegotiation)
           console.log('Guardian: sending answer to dependent (persisting to DB)');
           
-          // CRITICAL FIX: Strip disabled m-lines (port 9) from answer SDP
-          // This prevents m-line order mismatch errors at Dependent
+          // CRITICAL FIX: Strip disabled m-lines (port 9) AND their attributes from answer SDP
+          // This prevents m-line order mismatch and msid attribute errors at Dependent
           let answerToSend = offer as Record<string, unknown>;
           if (answerToSend && typeof answerToSend.sdp === 'string') {
             const sdpLines = (answerToSend.sdp as string).split('\r\n');
-            const filteredLines = sdpLines.filter(line => {
-              // Remove disabled m-lines (m=audio 9, m=video 9, m=application 9, etc.)
-              if (line.startsWith('m=') && line.includes(' 9 ')) {
-                console.log('Guardian: Stripping disabled m-line from answer:', line);
-                return false;
+            const filteredLines: string[] = [];
+            let skipNextAttributes = false;
+            
+            for (let i = 0; i < sdpLines.length; i++) {
+              const line = sdpLines[i];
+              
+              if (line.startsWith('m=')) {
+                // Check if this m-line is disabled (port 9)
+                if (line.includes(' 9 ')) {
+                  console.log('Guardian: Stripping disabled m-line and its attributes:', line);
+                  skipNextAttributes = true;
+                  continue;
+                } else {
+                  // Enabled m-line, keep it and resume adding attributes
+                  skipNextAttributes = false;
+                  filteredLines.push(line);
+                }
+              } else if (skipNextAttributes && (line.startsWith('a=') || line.startsWith('c=') || line.startsWith('b='))) {
+                // Skip attributes belonging to the disabled m-line
+                console.log('Guardian: Skipping attribute of disabled m-line:', line.substring(0, 50));
+                continue;
+              } else {
+                // Keep all other lines (session-level attributes, etc.)
+                filteredLines.push(line);
               }
-              return true;
-            });
+            }
+            
             const cleanedSdp = filteredLines.join('\r\n');
             answerToSend = { ...answerToSend, sdp: cleanedSdp };
             console.log('Guardian: Answer m-lines after cleanup:', cleanedSdp.split('\r\n').filter(l => l.startsWith('m=')).join(', '));

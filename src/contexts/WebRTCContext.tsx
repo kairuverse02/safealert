@@ -313,18 +313,37 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         console.log('[WebRTCContext] Renegotiation offer m-lines BEFORE cleanup:', offer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
       }
       
-      // CRITICAL FIX: Strip disabled m-lines (port 9) from offer before sending to Guardian
-      // This prevents m-line order mismatch errors when Guardian answers
+      // CRITICAL FIX: Strip disabled m-lines (port 9) AND their attributes from offer
+      // This prevents m-line order mismatch and msid attribute errors when Guardian answers
       let cleanedSdp = offer.sdp || '';
       const sdpLines = cleanedSdp.split('\r\n');
-      const filteredLines = sdpLines.filter(line => {
-        // Remove disabled m-lines (m=audio 9, m=video 9, m=application 9, etc.)
-        if (line.startsWith('m=') && line.includes(' 9 ')) {
-          console.log('[WebRTCContext] Stripping disabled m-line:', line);
-          return false;
+      const filteredLines: string[] = [];
+      let skipNextAttributes = false;
+      
+      for (let i = 0; i < sdpLines.length; i++) {
+        const line = sdpLines[i];
+        
+        if (line.startsWith('m=')) {
+          // Check if this m-line is disabled (port 9)
+          if (line.includes(' 9 ')) {
+            console.log('[WebRTCContext] Stripping disabled m-line and its attributes:', line);
+            skipNextAttributes = true;
+            continue;
+          } else {
+            // Enabled m-line, keep it and resume adding attributes
+            skipNextAttributes = false;
+            filteredLines.push(line);
+          }
+        } else if (skipNextAttributes && (line.startsWith('a=') || line.startsWith('c=') || line.startsWith('b='))) {
+          // Skip attributes belonging to the disabled m-line
+          console.log('[WebRTCContext] Skipping attribute of disabled m-line:', line.substring(0, 50));
+          continue;
+        } else {
+          // Keep all other lines (session-level attributes, etc.)
+          filteredLines.push(line);
         }
-        return true;
-      });
+      }
+      
       cleanedSdp = filteredLines.join('\r\n');
       const cleanedOffer = { ...offer, sdp: cleanedSdp };
       
