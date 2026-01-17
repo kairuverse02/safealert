@@ -222,6 +222,23 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
 
 
 
+    // Fetch reliable ICE servers from backend
+    let iceServers: RTCIceServer[] = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' },
+    ];
+    
+    try {
+      const res = await fetch('/api/ice');
+      const data = await res.json();
+      if (data.iceServers && Array.isArray(data.iceServers)) {
+        iceServers = data.iceServers;
+      }
+    } catch (e) {
+      console.warn('Guardian: Failed to fetch Twilio ICE servers, using default', e);
+    }
+
     const peer = new Peer({
       initiator: true,
       trickle: true,
@@ -232,43 +249,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
         offerToReceiveVideo: true
       },
       config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:global.stun.twilio.com:3478' },
-          // Multiple TURN servers for better NAT traversal
-          {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-          },
-          // Additional free TURN servers
-          {
-            urls: 'turn:relay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-          },
-          {
-            urls: 'turn:relay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-          },
-          {
-            urls: 'turn:relay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-          }
-        ],
+        iceServers: iceServers,
         iceCandidatePoolSize: 10,
         iceTransportPolicy: 'all',
         bundlePolicy: 'max-bundle',
