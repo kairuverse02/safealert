@@ -36,6 +36,8 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
   const animationFrameIdRef = useRef<number | null>(null);
   const lastAlertTimeRef = useRef(0);
   const lastPlayKickRef = useRef(0); // throttle play/load kicks when readyState stalls
+  const haveNothingStreakRef = useRef(0); // consecutive HAVE_NOTHING frames
+  const lastReattachRef = useRef(0); // throttle forced reattach attempts
 
   const [currentMode, setCurrentMode] = useState<MonitoringMode>("idle");
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
@@ -59,6 +61,26 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
   }, [currentMode]);
 
   const { initAudio, playSound } = useAudio(isMuted);
+
+  // Forcefully reattach the remote stream to break stuck HAVE_NOTHING state
+  const forceReattachRemoteVideo = useCallback(() => {
+    if (!videoRef.current || !remoteStream) return;
+    const now = Date.now();
+    if (now - lastReattachRef.current < 1500) return; // throttle rapid reattaches
+    lastReattachRef.current = now;
+    try {
+      const cloned = new MediaStream();
+      remoteStream.getVideoTracks().forEach((t) => cloned.addTrack(t));
+      remoteStream.getAudioTracks().forEach((t) => cloned.addTrack(t));
+      videoRef.current.srcObject = cloned;
+      videoRef.current.muted = true;
+      try { videoRef.current.load(); } catch {}
+      videoRef.current.play().catch(() => {});
+      console.log('MonitoringSystem: forced remote stream reattach to recover HAVE_NOTHING');
+    } catch (e) {
+      console.warn('MonitoringSystem: failed to force reattach', e);
+    }
+  }, [remoteStream]);
 
   const triggerAlert = useCallback(
     async (message: string, type: LogEntryType = "perimeter") => {
@@ -194,6 +216,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     
     if (readyState < videoRef.current.HAVE_METADATA) {
       if (readyState === videoRef.current.HAVE_NOTHING) {
+        haveNothingStreakRef.current += 1;
         console.log('MonitoringSystem: video readyState is HAVE_NOTHING (0) - no data loaded yet');
         // Actively kick playback if we appear stuck
         const now = Date.now();
@@ -202,11 +225,18 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           try { videoRef.current.load(); } catch {}
           videoRef.current.play().catch(() => {});
         }
+        // Force a reattach if HAVE_NOTHING persists (e.g., 0.5s of frames)
+        if (haveNothingStreakRef.current > 30) {
+          forceReattachRemoteVideo();
+        }
       } else if (readyState === videoRef.current.HAVE_CURRENT_DATA) {
         console.log('MonitoringSystem: video readyState is HAVE_CURRENT_DATA (1) - has current frame');
+        haveNothingStreakRef.current = 0;
       }
       return;
     }
+
+    haveNothingStreakRef.current = 0;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -344,7 +374,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     ctx.restore();
 
     lastFrameDataRef.current = new Uint8ClampedArray(currentFrameData);
-  }, [drawPerimeter, checkPerimeterCrossing, triggerAlert, remoteStream]);
+  }, [drawPerimeter, checkPerimeterCrossing, triggerAlert, remoteStream, forceReattachRemoteVideo]);
 
   // --- Patient Motion Alert ---
   useEffect(() => {
@@ -387,6 +417,8 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
 
   // Attach remote stream to the video element when provided and ensure playback starts
   useEffect(() => {
+    haveNothingStreakRef.current = 0;
+    lastReattachRef.current = 0;
     if (videoRef.current) {
       try {
         // Log audio track count for diagnostics
@@ -439,13 +471,14 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           if (videoRef.current.readyState === videoRef.current.HAVE_NOTHING) {
             try { videoRef.current.load(); } catch {}
             videoRef.current.play().catch(() => {});
+            forceReattachRemoteVideo();
           }
         }, 200);
       } catch (e) {
         console.warn('MonitoringSystem: failed to attach remote stream', e);
       }
     }
-  }, [remoteStream]);
+  }, [remoteStream, forceReattachRemoteVideo]);
 
   // Ensure tracks that start muted still trigger playback once data begins flowing
   useEffect(() => {
@@ -456,6 +489,9 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
       videoRef.current.muted = true;
       try { videoRef.current.load(); } catch {}
       videoRef.current.play().catch(() => {});
+      if (videoRef.current.readyState === videoRef.current.HAVE_NOTHING) {
+        forceReattachRemoteVideo();
+      }
     };
 
     // Attach to existing tracks
@@ -471,7 +507,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
       remoteStream.removeEventListener('addtrack', handleAddTrack);
       remoteStream.getTracks().forEach((track) => { track.onunmute = null; });
     };
-  }, [remoteStream]);
+  }, [remoteStream, forceReattachRemoteVideo]);
 
   const handleStartStopCamera = async () => {
     if (isCameraActive) {

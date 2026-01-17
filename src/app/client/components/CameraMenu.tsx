@@ -1,6 +1,6 @@
 'use client'
-import React, { useRef, useState } from 'react';
-
+import React, { useRef, useState, useEffect } from 'react';
+import { useWebRTC } from '@/contexts/WebRTCContext';
 import { Video, VideoOff, Mic, MicOff } from 'lucide-react';
 
 export default function CameraMenu() {
@@ -8,55 +8,52 @@ export default function CameraMenu() {
   const [camOn, setCamOn] = useState(false);
   const [micOn, setMicOn] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
+  
+  const { isPaired, localStream, startMonitoring, stopMonitoring } = useWebRTC();
 
-// Toggle camera
+  // Sync with WebRTC localStream
+  useEffect(() => {
+    if (localStream && videoRef.current) {
+      videoRef.current.srcObject = localStream;
+      videoRef.current.play().catch(() => {});
+      const hasVideo = localStream.getVideoTracks().length > 0;
+      const hasAudio = localStream.getAudioTracks().length > 0;
+      setCamOn(hasVideo);
+      setMicOn(hasAudio);
+      streamRef.current = localStream;
+    } else if (!localStream) {
+      if (videoRef.current) videoRef.current.srcObject = null;
+      setCamOn(false);
+      setMicOn(false);
+      streamRef.current = null;
+    }
+  }, [localStream]);
+
+// Toggle camera - now triggers WebRTC monitoring
   const handleToggleCam = async () => {
     if (!camOn) {
+      if (!isPaired) {
+        alert('Please pair with a guardian first by scanning their QR code.');
+        return;
+      }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: micOn });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play();
-        }
-        setCamOn(true);
-      } catch {
+        await startMonitoring();
+        // startMonitoring will update localStream, which will update our UI via useEffect
+      } catch (err) {
+        console.error('Failed to start monitoring:', err);
         alert('Camera access denied or not available.');
       }
     } else {
-      if (streamRef.current) {
-        streamRef.current.getVideoTracks().forEach(track => track.stop());
-        // If mic is still on, keep audio tracks
-        if (!micOn) streamRef.current.getAudioTracks().forEach(track => track.stop());
-        streamRef.current = null;
-      }
-      if (videoRef.current) videoRef.current.srcObject = null;
-      setCamOn(false);
+      await stopMonitoring();
     }
   };
 
-  // Toggle mic
+  // Toggle mic - currently tied to camera (WebRTC gets both)
   const handleToggleMic = async () => {
-    if (!micOn) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: camOn, audio: true });
-        streamRef.current = stream;
-        if (videoRef.current && camOn) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play();
-        }
-        setMicOn(true);
-      } catch {
-        alert('Microphone access denied or not available.');
-      }
-    } else {
-      if (streamRef.current) {
-        streamRef.current.getAudioTracks().forEach(track => track.stop());
-        // If cam is still on, keep video tracks
-        if (!camOn) streamRef.current.getVideoTracks().forEach(track => track.stop());
-        streamRef.current = null;
-      }
-      setMicOn(false);
+    // For now, mic control follows camera since WebRTC startMonitoring gets both
+    // In the future, we could add separate mic control with renegotiation
+    if (!micOn && !camOn) {
+      alert('Please enable camera first. Camera and microphone are enabled together.');
     }
   };
 
