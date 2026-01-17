@@ -268,7 +268,11 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         // Create and send renegotiation offer
         console.log('[WebRTCContext] Creating renegotiation offer...');
         const offer = await pc.createOffer();
+        if (offer.sdp) {
+          console.log('[WebRTCContext] Renegotiation offer m-lines:', offer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
+        }
         await pc.setLocalDescription(offer);
+        console.log('[WebRTCContext] Renegotiation offer sent, signalingState:', pc.signalingState);
         
         // Send offer to guardian via API
         const roomId = roomIdRef.current || currentRoomId;
@@ -305,22 +309,31 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
                   // Only apply answer if PC is in "have-local-offer" state (we sent offer, waiting for answer)
                   if (pc.signalingState === 'have-local-offer') {
                     console.log('[WebRTCContext] Received guardian answer, applying (signalingState: have-local-offer)');
+                    console.log('[WebRTCContext] Guardian answer SDP m-lines:', answer.sdp.split('\r\n').filter((line: string) => line.startsWith('m=')).join(', '));
                     lastAppliedAnswerSdp = answer.sdp;
+                    
+                    // Log transceiver state BEFORE applying answer
+                    const transceiversBefore = pc.getTransceivers();
+                    transceiversBefore.forEach((t, idx) => {
+                      console.log(`[WebRTCContext] BEFORE answer - Transceiver ${idx}: mid=${t.mid} sender.transport=${t.sender.transport?.state}`);
+                    });
+                    
                     await pc.setRemoteDescription(new RTCSessionDescription(answer));
                     console.log('[WebRTCContext] Renegotiation complete');
+                    console.log('[WebRTCContext] PC state after answer - signalingState:', pc.signalingState, 'connectionState:', pc.connectionState, 'iceConnectionState:', pc.iceConnectionState);
                     
                     // Check transceiver sender state after renegotiation
                     const transceivers = pc.getTransceivers();
                     transceivers.forEach((t, idx) => {
-                      console.log(`[WebRTCContext] Transceiver ${idx}: mid=${t.mid} sender.kind=${t.sender.track?.kind} sender.track=${!!t.sender.track} receiver.kind=${t.receiver.track?.kind}`);
+                      console.log(`[WebRTCContext] AFTER answer - Transceiver ${idx}: mid=${t.mid} sender.kind=${t.sender.track?.kind} sender.track=${!!t.sender.track} receiver.kind=${t.receiver.track?.kind}`);
                       
                       // Check RTP sender transport state
                       const sender = t.sender;
-                      console.log(`[WebRTCContext] Transceiver ${idx} sender state: transport=${sender.transport?.state}`);
+                      console.log(`[WebRTCContext] AFTER answer - Transceiver ${idx} sender state: transport=${sender.transport?.state}`);
                       
                       // Check if sender has active parameters
                       if (sender.track) {
-                        console.log(`[WebRTCContext] Transceiver ${idx} track: kind=${sender.track.kind} enabled=${sender.track.enabled} readyState=${sender.track.readyState} muted=${sender.track.muted}`);
+                        console.log(`[WebRTCContext] AFTER answer - Transceiver ${idx} track: kind=${sender.track.kind} enabled=${sender.track.enabled} readyState=${sender.track.readyState} muted=${sender.track.muted}`);
                       }
                     });
                     
@@ -551,7 +564,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           }
         };
         nativePc.onconnectionstatechange = () => {
-          console.log('[WebRTCContext] Dependent connection state:', nativePc.connectionState);
+          console.log('[WebRTCContext] Dependent connection state:', nativePc.connectionState, 'iceConnectionState:', nativePc.iceConnectionState, 'signalingState:', nativePc.signalingState);
         };
         nativePc.onicegatheringstatechange = () => {
           console.log('[WebRTCContext] Dependent ICE gathering state:', nativePc.iceGatheringState);
