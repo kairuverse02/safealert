@@ -373,38 +373,54 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           });
         }
         
-        // CRITICAL WORKAROUND: Force SDP regeneration by toggling direction with EXTENDED delay
-        // 50ms was insufficient. Trying 500ms to ensure browser fully processes state changes
-        console.log('[WebRTCContext] Force-triggering SDP regeneration via direction toggle with 500ms delays...');
-        mediaTransceivers.forEach(t => {
-          const oldDir = t.direction;
-          t.direction = 'inactive';
-          console.log(`  [Inactive] transceiver direction=${oldDir} → inactive (preparing for sendrecv)`);
+        // NEW APPROACH: Don't toggle direction - REPLACE transceivers entirely
+        // Remove old recvonly transceivers and add new sendrecv ones with proper SDP generation
+        console.log('[WebRTCContext] NEW APPROACH: Replacing recvonly transceivers with fresh sendrecv ones...');
+        
+        const allTransceivers = pc.getTransceivers();
+        console.log(`[WebRTCContext] Total transceivers: ${allTransceivers.length}`);
+        
+        // Find and stop the old recvonly transceivers for each media kind
+        const transceiversByKind: { [key: string]: RTCRtpTransceiver } = {};
+        allTransceivers.forEach(t => {
+          const kind = t.receiver.track?.kind;
+          if (kind === 'audio' || kind === 'video') {
+            if (!transceiversByKind[kind]) {
+              transceiversByKind[kind] = t;
+              console.log(`[WebRTCContext] Found existing ${kind} transceiver (direction=${t.direction}, mid=${t.mid})`);
+            }
+          }
         });
         
-        // Wait 500ms to ensure browser fully processes the inactive state change
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Verify state actually changed
-        console.log('[WebRTCContext] Verifying inactive state applied:');
-        mediaTransceivers.forEach((t, idx) => {
-          console.log(`  Transceiver ${idx}: direction=${t.direction} (should be inactive)`);
+        // Stop the old transceivers by setting direction to inactive, then add new ones
+        Object.entries(transceiversByKind).forEach(([kind, transceiver]) => {
+          transceiver.direction = 'inactive';
+          transceiver.stop();
+          console.log(`[WebRTCContext] Stopped old ${kind} transceiver`);
         });
         
-        // Set back to sendrecv to trigger regeneration
-        console.log('[WebRTCContext] Setting transceivers back to sendrecv...');
-        mediaTransceivers.forEach(t => {
-          t.direction = 'sendrecv';
-          console.log(`  [Reset] transceiver direction=inactive → sendrecv (triggering SDP regeneration)`);
+        // Small delay to let browser process the stop
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Now add fresh sendrecv transceivers for video and audio
+        console.log('[WebRTCContext] Adding fresh sendrecv transceivers for media...');
+        stream.getTracks().forEach(track => {
+          const kind = track.kind;
+          console.log(`[WebRTCContext] Adding ${kind} track to fresh transceiver...`);
+          pc.addTransceiver(track, { direction: 'sendrecv', sendEncodings: kind === 'video' ? [{ maxBitrate: 500000 }] : undefined });
         });
         
-        // Wait 500ms for sendrecv to propagate before creating offer - CRITICAL for SDP regeneration
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Wait for new transceivers to settle
+        await new Promise(resolve => setTimeout(resolve, 100));
         
-        // Verify sendrecv state
-        console.log('[WebRTCContext] Verifying sendrecv state before offer creation:');
-        mediaTransceivers.forEach((t, idx) => {
-          console.log(`  Transceiver ${idx}: direction=${t.direction} (should be sendrecv), sender.track=${!!t.sender.track}`);
+        // Verify new transceiver state
+        console.log('[WebRTCContext] Verifying fresh transceiver state:');
+        const freshTransceivers = pc.getTransceivers();
+        freshTransceivers.forEach((t, idx) => {
+          const kind = t.sender.track?.kind || t.receiver.track?.kind;
+          if (kind === 'audio' || kind === 'video') {
+            console.log(`  Transceiver ${idx} (${kind}): direction=${t.direction}, sender.track=${!!t.sender.track}, mid=${t.mid}`);
+          }
         });
         
         // Create and send renegotiation offer
