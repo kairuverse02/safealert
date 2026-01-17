@@ -430,28 +430,6 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                               console.log('Guardian: received NEW renegotiation offer, signaling peer');
                               lastProcessedOfferSdpRef.current = offerSdp;
                               
-                              // CRITICAL FIX: Before signaling the renegotiation offer, update Guardian's transceiver directions
-                              // to 'sendrecv' so that the answer SDP will accept Dependent's ports instead of using port 9
-                              try {
-                                const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                                if (pc) {
-                                  const transceivers = pc.getTransceivers();
-                                  console.log('Guardian: Updating transceiver directions to sendrecv before renegotiation. Count:', transceivers.length);
-                                  for (const transceiver of transceivers) {
-                                    // Only update media transceivers (video/audio), not data channel
-                                    if ((transceiver.receiver?.track?.kind === 'video' || transceiver.receiver?.track?.kind === 'audio' ||
-                                         transceiver.sender?.track?.kind === 'video' || transceiver.sender?.track?.kind === 'audio') &&
-                                        transceiver.direction !== 'sendrecv') {
-                                      const oldDirection = transceiver.direction;
-                                      transceiver.direction = 'sendrecv';
-                                      console.log(`Guardian: Updated transceiver direction: ${oldDirection} → sendrecv (${transceiver.receiver?.track?.kind || transceiver.sender?.track?.kind})`);
-                                    }
-                                  }
-                                }
-                              } catch (err) {
-                                console.warn('Guardian: failed to update transceiver directions before renegotiation', err);
-                              }
-                              
                               peerRef.current.signal(newOffer);
                             }
                           }
@@ -522,6 +500,26 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
               // When ICE is connected, mark as paired and show monitoring interface
               if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
                 console.log('Guardian: ICE connected, marking as paired');
+                
+                // CRITICAL FIX: Set all transceivers to sendrecv IMMEDIATELY on ICE connection
+                // This ensures that when renegotiation offers arrive, the answer will have
+                // real ports instead of port 9. This must happen BEFORE any renegotiation offer.
+                try {
+                  const transceivers = pc.getTransceivers();
+                  console.log('Guardian: Setting all transceivers to sendrecv on ICE connected. Count:', transceivers.length);
+                  for (const transceiver of transceivers) {
+                    if ((transceiver.receiver?.track?.kind === 'video' || transceiver.receiver?.track?.kind === 'audio' ||
+                         transceiver.sender?.track?.kind === 'video' || transceiver.sender?.track?.kind === 'audio') &&
+                        transceiver.direction !== 'sendrecv') {
+                      const oldDirection = transceiver.direction;
+                      transceiver.direction = 'sendrecv';
+                      console.log(`Guardian: Set transceiver to sendrecv (was ${oldDirection})`);
+                    }
+                  }
+                } catch (err) {
+                  console.warn('Guardian: failed to set transceiver directions on ICE connect', err);
+                }
+                
                 setIsWaiting(false);
                 setIsPaired(true);
                 setShowMonitoring(true);
@@ -782,28 +780,6 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           if (offer && peerRef.current && offer.type === 'offer' && offer.sdp) {
             try {
               console.log('[REALTIME] Received renegotiation offer from dependent during monitoring');
-              
-              // CRITICAL FIX: Before signaling the renegotiation offer, update Guardian's transceiver directions
-              // to 'sendrecv' so that the answer SDP will accept Dependent's ports instead of using port 9
-              try {
-                const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                if (pc) {
-                  const transceivers = pc.getTransceivers();
-                  console.log('[REALTIME] Updating transceiver directions to sendrecv before renegotiation. Count:', transceivers.length);
-                  for (const transceiver of transceivers) {
-                    // Only update media transceivers (video/audio), not data channel
-                    if ((transceiver.receiver?.track?.kind === 'video' || transceiver.receiver?.track?.kind === 'audio' ||
-                         transceiver.sender?.track?.kind === 'video' || transceiver.sender?.track?.kind === 'audio') &&
-                        transceiver.direction !== 'sendrecv') {
-                      const oldDirection = transceiver.direction;
-                      transceiver.direction = 'sendrecv';
-                      console.log(`[REALTIME] Updated transceiver direction: ${oldDirection} → sendrecv (${transceiver.receiver?.track?.kind || transceiver.sender?.track?.kind})`);
-                    }
-                  }
-                }
-              } catch (err) {
-                console.warn('[REALTIME] failed to update transceiver directions before renegotiation', err);
-              }
               
               // Signal the offer to simple-peer, which will trigger answer generation
               peerRef.current.signal(offer as Peer.SignalData | string);
