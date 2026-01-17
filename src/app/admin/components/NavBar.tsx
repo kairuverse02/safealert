@@ -141,6 +141,16 @@ export default function Navbar({
                       </div>
                     </div>
                     {/* MENU ITEMS */}
+                    <button
+                      onClick={() => {
+                        router.push('/client');
+                        setIsDropdownOpen(false);
+                      }}
+                      className="w-full flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                    >
+                      <span className="mr-3 text-gray-500 text-lg">👤</span>
+                      <span>Switch to Dependent</span>
+                    </button>
                     <Link href="/admin/profile"
                       className="w-full flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                     >

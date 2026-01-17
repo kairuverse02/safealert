@@ -285,6 +285,18 @@ export default function Navbar({
                   </div>
                 )}
 
+                <button
+                  onClick={() => {
+                    router.push('/admin');
+                    setIsDropdownOpen(false);
+                  }}
+                  role="menuitem"
+                  className="w-full flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                >
+                  <span className="mr-3 text-gray-500 text-lg">📊</span>
+                  <span>Switch to Guardian</span>
+                </button>
+
                 <Link href="/client/account"
                   onClick={() => setIsDropdownOpen(false)}
                   role="menuitem"
