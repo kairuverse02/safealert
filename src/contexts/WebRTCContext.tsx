@@ -221,6 +221,21 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         }
       }
       
+      // CRITICAL: Remove any application/datachannel transceivers before adding media tracks
+      // This ensures audio/video m-lines come before datachannel m-line in the offer
+      const allExistingTransceivers = pc.getTransceivers();
+      for (const t of allExistingTransceivers) {
+        // Remove datachannel transceivers - they interfere with media m-line ordering
+        if (!t.sender?.track && !t.receiver?.track && t.direction === 'recvonly') {
+          console.log('[WebRTCContext] Removing unused recvonly transceiver to prevent m-line ordering issues');
+          try {
+            t.direction = 'inactive';
+          } catch (e) {
+            console.warn('[WebRTCContext] Could not set recvonly transceiver to inactive:', e);
+          }
+        }
+      }
+      
       // CRITICAL: Reuse existing transceivers by kind, don't create duplicates
       const streamTracks = stream.getTracks();
       console.log(`[WebRTCContext] Ensuring transceivers exist for ${streamTracks.length} track(s)`);
@@ -271,11 +286,18 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         
         if (transceiver && transceiver.sender) {
           console.log(`[WebRTCContext] Replacing ${track.kind} track on transceiver`);
+          
+          // CRITICAL: Ensure direction is sendrecv BEFORE replacing track
+          if (transceiver.direction !== 'sendrecv') {
+            transceiver.direction = 'sendrecv';
+            console.log(`[WebRTCContext] Pre-replaceTrack: Set ${track.kind} transceiver to sendrecv`);
+          }
+          
           await transceiver.sender.replaceTrack(track);
           
-          // CRITICAL: Reinforce direction after replaceTrack for newly-created transceivers
+          // CRITICAL: Reinforce direction after replaceTrack
           transceiver.direction = 'sendrecv';
-          console.log(`[WebRTCContext] Reinforced ${track.kind} transceiver direction to sendrecv after replaceTrack`);
+          console.log(`[WebRTCContext] Post-replaceTrack: Reinforced ${track.kind} transceiver direction to sendrecv`);
           
           if (track.kind === 'video') {
             const settings = track.getSettings();
@@ -323,10 +345,14 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       for (const transceiver of allTransceivers) {
         // Only modify transceivers that have actual tracks (sender or receiver)
         const hasTrack = !!transceiver.sender?.track || !!transceiver.receiver?.track;
-        if (hasTrack && transceiver.direction !== 'sendrecv') {
-          const oldDirection = transceiver.direction;
-          transceiver.direction = 'sendrecv';
-          console.log(`[WebRTCContext] Updated transceiver to sendrecv (was ${oldDirection})`);
+        if (hasTrack) {
+          if (transceiver.direction !== 'sendrecv') {
+            const oldDirection = transceiver.direction;
+            transceiver.direction = 'sendrecv';
+            console.log(`[WebRTCContext] Updated transceiver to sendrecv (was ${oldDirection})`);
+          }
+          // EXTRA: Log sender/receiver state
+          console.log(`[WebRTCContext] Transceiver state before offer: mid=${transceiver.mid}, direction=${transceiver.direction}, sender=${!!transceiver.sender?.track}, receiver=${!!transceiver.receiver?.track}`);
         }
       }
       
@@ -336,7 +362,21 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       
       while (attemptCount < maxAttempts && offer.sdp && offer.sdp.includes('m=audio 9')) {
         attemptCount++;
-        console.warn(`[WebRTCContext] Audio m-line stuck at port 9 (attempt ${attemptCount}/${maxAttempts}), retrying createOffer()...`);
+        console.warn(`[WebRTCContext] Audio m-line stuck at port 9 (attempt ${attemptCount}/${maxAttempts}), forcing transceiver states...`);
+        
+        // Force transceivers to be truly active
+        for (const t of pc.getTransceivers()) {
+          const hasTrack = !!t.sender?.track || !!t.receiver?.track;
+          if (hasTrack) {
+            // Set direction twice with a small delay to force state update
+            t.direction = 'recvonly';
+            await new Promise(resolve => setTimeout(resolve, 10));
+            t.direction = 'sendrecv';
+            const kind = t.sender?.track?.kind || t.receiver?.track?.kind || 'unknown';
+            console.log(`[WebRTCContext] Retry ${attemptCount}: Force cycled ${kind} transceiver direction`);
+          }
+        }
+        
         await new Promise(resolve => setTimeout(resolve, 50));
         offer = await pc.createOffer();
       }
