@@ -310,13 +310,32 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       }
       
       if (offer.sdp) {
-        console.log('[WebRTCContext] Renegotiation offer m-lines:', offer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
+        console.log('[WebRTCContext] Renegotiation offer m-lines BEFORE cleanup:', offer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
       }
       
-      await pc.setLocalDescription(offer);
+      // CRITICAL FIX: Strip disabled m-lines (port 9) from offer before sending to Guardian
+      // This prevents m-line order mismatch errors when Guardian answers
+      let cleanedSdp = offer.sdp || '';
+      const sdpLines = cleanedSdp.split('\r\n');
+      const filteredLines = sdpLines.filter(line => {
+        // Remove disabled m-lines (m=audio 9, m=video 9, m=application 9, etc.)
+        if (line.startsWith('m=') && line.includes(' 9 ')) {
+          console.log('[WebRTCContext] Stripping disabled m-line:', line);
+          return false;
+        }
+        return true;
+      });
+      cleanedSdp = filteredLines.join('\r\n');
+      const cleanedOffer = { ...offer, sdp: cleanedSdp };
+      
+      if (cleanedOffer.sdp) {
+        console.log('[WebRTCContext] Renegotiation offer m-lines AFTER cleanup:', cleanedOffer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
+      }
+      
+      await pc.setLocalDescription(offer); // Use original offer for local description
       console.log('[WebRTCContext] Renegotiation offer sent, signalingState:', pc.signalingState);
       
-      // Send offer to guardian via API
+      // Send CLEANED offer to guardian via API
       const roomId = roomIdRef.current || currentRoomId;
       console.log('[WebRTCContext] Using room ID for renegotiation:', roomId);
       if (roomId) {
@@ -324,7 +343,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           const resp = await fetch(`/api/signaling/${roomId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ offer_signal: offer }),
+            body: JSON.stringify({ offer_signal: cleanedOffer }),
           });
           console.log('[WebRTCContext] Sent renegotiation offer:', resp.status);
           

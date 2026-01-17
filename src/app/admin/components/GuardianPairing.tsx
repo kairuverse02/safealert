@@ -330,10 +330,29 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
         } else if (answerSignal) {
           // Send answer back to dependent (for renegotiation)
           console.log('Guardian: sending answer to dependent (persisting to DB)');
+          
+          // CRITICAL FIX: Strip disabled m-lines (port 9) from answer SDP
+          // This prevents m-line order mismatch errors at Dependent
+          let answerToSend = offer as Record<string, unknown>;
+          if (answerToSend && typeof answerToSend.sdp === 'string') {
+            const sdpLines = (answerToSend.sdp as string).split('\r\n');
+            const filteredLines = sdpLines.filter(line => {
+              // Remove disabled m-lines (m=audio 9, m=video 9, m=application 9, etc.)
+              if (line.startsWith('m=') && line.includes(' 9 ')) {
+                console.log('Guardian: Stripping disabled m-line from answer:', line);
+                return false;
+              }
+              return true;
+            });
+            const cleanedSdp = filteredLines.join('\r\n');
+            answerToSend = { ...answerToSend, sdp: cleanedSdp };
+            console.log('Guardian: Answer m-lines after cleanup:', cleanedSdp.split('\r\n').filter(l => l.startsWith('m=')).join(', '));
+          }
+          
           const resp = await fetch(`/api/signaling/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ answer_signal: offer }),
+            body: JSON.stringify({ answer_signal: answerToSend }),
           });
           const json = await resp.json().catch(() => null);
           console.log('Guardian: publish answer response', resp.status, json);
