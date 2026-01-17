@@ -479,6 +479,30 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                                 console.warn('Guardian: failed to update transceivers before renegotiation', err);
                               }
                               
+                              // CRITICAL: Also remove dummy tracks here before renegotiation answer is created
+                              try {
+                                const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+                                if (pc) {
+                                  const senders = pc.getSenders();
+                                  for (const sender of senders) {
+                                    if (sender.track && (sender.track.kind === 'audio' || sender.track.kind === 'video')) {
+                                      // Identify dummy tracks by label or disabled state
+                                      const isDummy = !sender.track.enabled || sender.track.label.includes('stream');
+                                      if (isDummy) {
+                                        console.log(`Guardian: Removing dummy ${sender.track.kind} track before renegotiation answer`);
+                                        try {
+                                          pc.removeTrack(sender);
+                                        } catch (e) {
+                                          console.warn(`Guardian: Exception removing dummy ${sender.track.kind} track`, e);
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              } catch (err) {
+                                console.warn('Guardian: Failed to remove dummy tracks before renegotiation answer', err);
+                              }
+                              
                               lastProcessedOfferSdpRef.current = offerSdp;
                               
                               peerRef.current.signal(newOffer);
@@ -551,6 +575,28 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
               // When ICE is connected, mark as paired and show monitoring interface
               if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
                 console.log('Guardian: ICE connected, marking as paired');
+                
+                // CRITICAL FIX: Remove dummy tracks BEFORE renegotiation so answer has real ports
+                // The dummy tracks prevent video m-line from being enabled in answer SDP
+                try {
+                  const senders = pc.getSenders();
+                  for (const sender of senders) {
+                    if (sender.track && (sender.track.kind === 'audio' || sender.track.kind === 'video')) {
+                      // Dummy canvas video tracks will have 'stream' label or be disabled
+                      const isDummy = !sender.track.enabled || sender.track.label.includes('stream');
+                      if (isDummy) {
+                        console.log(`Guardian: Removing dummy ${sender.track.kind} track before renegotiation`);
+                        try {
+                          pc.removeTrack(sender);
+                        } catch (e) {
+                          console.warn(`Guardian: Exception removing dummy ${sender.track.kind} track`, e);
+                        }
+                      }
+                    }
+                  }
+                } catch (err) {
+                  console.warn('Guardian: Failed to remove dummy tracks', err);
+                }
                 
                 // CRITICAL FIX: Set all transceivers to sendrecv IMMEDIATELY on ICE connection
                 // This ensures that when renegotiation offers arrive, the answer will have
