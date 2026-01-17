@@ -230,11 +230,14 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         console.log('[WebRTCContext] Found', existingTransceivers.length, 'existing transceivers for track reuse');
         
         const tracksToAdd = stream.getTracks();
+        console.log(`[WebRTCContext] Stream has ${tracksToAdd.length} tracks to add:`, tracksToAdd.map(t => `${t.kind}(${t.id})`).join(', '));
         
         // CRITICAL: Use Promise.all to wait for ALL track replacements to complete
         // This ensures the transceivers are fully updated before creating the offer
         const trackReplacementPromises = tracksToAdd.map(async (track) => {
           try {
+            console.log(`[WebRTCContext] Processing ${track.kind} track (id=${track.id}, enabled=${track.enabled}, readyState=${track.readyState})`);
+            
             // Try to find a transceiver of the same kind that can be reused
             const matchingTransceiver = existingTransceivers.find(t => 
               t.receiver.track?.kind === track.kind && 
@@ -242,16 +245,20 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             );
             
             if (matchingTransceiver) {
+              console.log(`[WebRTCContext] Found matching ${track.kind} transceiver (mid=${matchingTransceiver.mid}, direction=${matchingTransceiver.direction})`);
+              
               // CRITICAL: Change transceiver direction from recvonly to sendrecv BEFORE replacing track
               // This activates the sender side of the transceiver
               console.log(`[WebRTCContext] Changing ${track.kind} transceiver direction from ${matchingTransceiver.direction} to sendrecv`);
               matchingTransceiver.direction = 'sendrecv';
+              console.log(`[WebRTCContext] Direction changed - verifying: direction=${matchingTransceiver.direction}`);
               
               // CRITICAL: WAIT for track replacement to complete before creating offer
               // This ensures the transceiver state is fully updated
               console.log(`[WebRTCContext] Reusing existing ${track.kind} transceiver instead of creating new one`);
-              await matchingTransceiver.sender.replaceTrack(track);
-              console.log(`[WebRTCContext] Replaced ${track.kind} track on existing transceiver, sender transport should now be active`);
+              const result = await matchingTransceiver.sender.replaceTrack(track);
+              console.log(`[WebRTCContext] Replaced ${track.kind} track (id=${track.id}) on transceiver - replaceTrack returned:`, result);
+              console.log(`[WebRTCContext] After replaceTrack: sender.track=${!!matchingTransceiver.sender.track} (id=${matchingTransceiver.sender.track?.id}), direction=${matchingTransceiver.direction}`);
             } else {
               // Fall back to addTrack if no matching transceiver
               console.log(`[WebRTCContext] No matching transceiver found for ${track.kind}, creating new one`);
@@ -268,6 +275,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
               // Check if track is actually producing frames
               setTimeout(() => {
                 console.log(`[WebRTCContext] Video track status after 1s: enabled=${track.enabled}, readyState=${track.readyState}, muted=${track.muted}`);
+
               }, 1000);
               
               // Check WebRTC send stats every 3s
@@ -297,6 +305,12 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         
         // Wait for all track replacements to complete
         await Promise.all(trackReplacementPromises);
+        
+        console.log('[WebRTCContext] All track replacements completed, verifying transceiver state...');
+        existingTransceivers.forEach((t, i) => {
+          const kind = t.sender.track?.kind || t.receiver.track?.kind;
+          console.log(`  Transceiver ${i} (${kind}): direction=${t.direction}, sender.track=${!!t.sender.track} (track.id=${t.sender.track?.id}), receiver.track=${!!t.receiver.track}`);
+        });
         
         // CRITICAL: Verify transceiver state BEFORE creating offer
         // The browser may not have fully applied the direction change yet
