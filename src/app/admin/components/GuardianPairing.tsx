@@ -620,6 +620,14 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                 // Check WebRTC receive stats for video every 3s
                 if (ev.track.kind === 'video' && pc) {
                   const track = ev.track;
+                  // Log transport state right now
+                  const transceivers = pc.getTransceivers();
+                  transceivers.forEach((t, idx) => {
+                    if (t.receiver.track?.id === track.id) {
+                      console.log(`[Guardian] Video transceiver ${idx} state: transport=${t.receiver.transport?.state} dtls=${t.receiver.transport?.iceTransport?.state}`);
+                    }
+                  });
+                  
                   const statsInterval = setInterval(async () => {
                     if (track.readyState !== 'live') {
                       clearInterval(statsInterval);
@@ -631,7 +639,9 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         const r = report as any;
                         if (r.type === 'inbound-rtp' && r.kind === 'video') {
-                          console.log(`[Guardian] Video receive stats: ${r.framesReceived || 0} frames received, ${r.bytesReceived || 0} bytes, ${r.framesPerSecond || 0} fps, ${r.framesDecoded || 0} decoded`);
+                          console.log(`[Guardian] Video receive stats: ${r.framesReceived || 0} frames received, ${r.bytesReceived || 0} bytes, ${r.framesPerSecond || 0} fps, ${r.framesDecoded || 0} decoded, bytesSent=${r.bytesSent || 0}`);
+                        } else if (r.type === 'candidate-pair' && r.state === 'succeeded') {
+                          console.log(`[Guardian] RTP candidate pair: state=${r.state} currentRoundTripTime=${r.currentRoundTripTime} availableOutgoingBitrate=${r.availableOutgoingBitrate}`);
                         }
                       });
                     } catch (e) {

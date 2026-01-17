@@ -308,6 +308,13 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
                     lastAppliedAnswerSdp = answer.sdp;
                     await pc.setRemoteDescription(new RTCSessionDescription(answer));
                     console.log('[WebRTCContext] Renegotiation complete');
+                    
+                    // Check transceiver sender state after renegotiation
+                    const transceivers = pc.getTransceivers();
+                    transceivers.forEach((t, idx) => {
+                      console.log(`[WebRTCContext] Transceiver ${idx}: mid=${t.mid} sender.kind=${t.sender.track?.kind} sender.track=${!!t.sender.track} receiver.kind=${t.receiver.track?.kind}`);
+                    });
+                    
                     // Stop polling after receiving answer
                     if (answerPollRef.current) {
                       clearInterval(answerPollRef.current);
