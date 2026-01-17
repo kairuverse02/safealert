@@ -160,6 +160,12 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       return;
     }
     
+    const pc = nativePcRef.current || (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+    if (pc && pc.signalingState !== 'stable') {
+      console.warn('[WebRTCContext] Cannot start monitoring - peer connection not in stable state:', pc.signalingState);
+      return;
+    }
+    
     try {
       // Get media stream with video + audio
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -290,15 +296,6 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         } else {
           console.error('[WebRTCContext] Cannot send renegotiation offer - no room ID');
         }
-      }
-      
-      // Clear the command that triggered monitoring
-      if (currentRoomId) {
-        await fetch(`/api/signaling/${currentRoomId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ guardian_command: null }),
-        });
       }
       
       console.log('[WebRTCContext] Monitoring started successfully');
@@ -755,24 +752,26 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             
             if (cmd === 'start_monitor') {
               console.log('[WebRTCContext] Command poll: received start_monitor');
-              await startMonitoring();
-              // Clear command after executing
+              // Clear command IMMEDIATELY to prevent duplicate polling
               await fetch(`/api/signaling/${roomId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ guardian_command: null }),
               });
-              lastProcessedCommand = null; // Reset after clearing
+              lastProcessedCommand = null; // Reset so we can process next command
+              // Now start monitoring
+              await startMonitoring();
             } else if (cmd === 'stop_monitor') {
               console.log('[WebRTCContext] Command poll: received stop_monitor');
-              stopMonitoring();
-              // Clear command after executing
+              // Clear command IMMEDIATELY
               await fetch(`/api/signaling/${roomId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ guardian_command: null }),
               });
-              lastProcessedCommand = null; // Reset after clearing
+              lastProcessedCommand = null; // Reset so we can process next command
+              // Now stop monitoring
+              stopMonitoring();
             }
           } else if (!cmd && lastProcessedCommand) {
             // Command was cleared, reset tracker
