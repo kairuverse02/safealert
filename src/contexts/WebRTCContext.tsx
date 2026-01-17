@@ -373,7 +373,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           });
         }
         
-        // CRITICAL WORKAROUND: Force SDP regeneration by toggling direction
+        // CRITICAL WORKAROUND: Force SDP regeneration by toggling direction with delay
         // Browser may cache SDP if direction was just set, so force it through inactive state
         console.log('[WebRTCContext] Force-triggering SDP regeneration via direction toggle...');
         mediaTransceivers.forEach(t => {
@@ -382,12 +382,18 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           console.log(`  [Inactive] transceiver direction=${oldDir} → inactive (preparing for sendrecv)`);
         });
         
-        // Immediately set back to sendrecv to trigger regeneration
+        // Wait 50ms to let browser process the inactive state change
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        // Set back to sendrecv to trigger regeneration
         console.log('[WebRTCContext] Setting transceivers back to sendrecv...');
         mediaTransceivers.forEach(t => {
           t.direction = 'sendrecv';
           console.log(`  [Reset] transceiver direction=inactive → sendrecv (triggering SDP regeneration)`);
         });
+        
+        // Wait another 50ms for sendrecv to propagate before creating offer
+        await new Promise(resolve => setTimeout(resolve, 50));
         
         // Create and send renegotiation offer
         console.log('[WebRTCContext] Creating renegotiation offer...');
