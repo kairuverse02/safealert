@@ -230,7 +230,10 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         console.log('[WebRTCContext] Found', existingTransceivers.length, 'existing transceivers for track reuse');
         
         const tracksToAdd = stream.getTracks();
-        tracksToAdd.forEach((track) => {
+        
+        // CRITICAL: Use Promise.all to wait for ALL track replacements to complete
+        // This ensures the transceivers are fully updated before creating the offer
+        const trackReplacementPromises = tracksToAdd.map(async (track) => {
           try {
             // Try to find a transceiver of the same kind that can be reused
             const matchingTransceiver = existingTransceivers.find(t => 
@@ -244,13 +247,11 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
               console.log(`[WebRTCContext] Changing ${track.kind} transceiver direction from ${matchingTransceiver.direction} to sendrecv`);
               matchingTransceiver.direction = 'sendrecv';
               
-              // Now replace the track on the activated sender
+              // CRITICAL: WAIT for track replacement to complete before creating offer
+              // This ensures the transceiver state is fully updated
               console.log(`[WebRTCContext] Reusing existing ${track.kind} transceiver instead of creating new one`);
-              matchingTransceiver.sender.replaceTrack(track).then(() => {
-                console.log(`[WebRTCContext] Replaced ${track.kind} track on existing transceiver, sender transport should now be active`);
-              }).catch((e) => {
-                console.error(`[WebRTCContext] Failed to replace ${track.kind} track:`, e);
-              });
+              await matchingTransceiver.sender.replaceTrack(track);
+              console.log(`[WebRTCContext] Replaced ${track.kind} track on existing transceiver, sender transport should now be active`);
             } else {
               // Fall back to addTrack if no matching transceiver
               console.log(`[WebRTCContext] No matching transceiver found for ${track.kind}, creating new one`);
@@ -293,6 +294,9 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             console.warn(`[WebRTCContext] Failed to add ${track.kind} track:`, e);
           }
         });
+        
+        // Wait for all track replacements to complete
+        await Promise.all(trackReplacementPromises);
         
         // Create and send renegotiation offer
         console.log('[WebRTCContext] Creating renegotiation offer...');
