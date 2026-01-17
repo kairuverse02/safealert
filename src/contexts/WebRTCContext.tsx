@@ -298,6 +298,41 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         // Wait for all track replacements to complete
         await Promise.all(trackReplacementPromises);
         
+        // CRITICAL: Verify transceiver state BEFORE creating offer
+        // The browser may not have fully applied the direction change yet
+        const transceivers = pc.getTransceivers();
+        console.log('[WebRTCContext] Transceiver states BEFORE offer creation:');
+        transceivers.forEach((t, i) => {
+          console.log(`  Transceiver ${i}: direction=${t.direction}, mid=${t.mid}, sender.track=${!!t.sender.track}, receiver.track=${!!t.receiver.track}`);
+        });
+        
+        // CRITICAL: Verify all transceivers are in sendrecv before creating offer
+        // If not, the browser will still create disabled m-lines (port 9)
+        let allSendrecv = transceivers.every(t => t.direction === 'sendrecv' && t.sender.track);
+        let attempts = 0;
+        while (!allSendrecv && attempts < 5) {
+          console.log(`[WebRTCContext] Waiting for transceiver state propagation (attempt ${attempts + 1}/5)...`);
+          await new Promise(resolve => setTimeout(resolve, 20));
+          
+          // Check again
+          const updatedTransceivers = pc.getTransceivers();
+          allSendrecv = updatedTransceivers.every(t => t.direction === 'sendrecv' && t.sender.track);
+          if (allSendrecv) {
+            console.log('[WebRTCContext] All transceivers ready for offer creation');
+            break;
+          }
+          attempts++;
+        }
+        
+        if (!allSendrecv) {
+          console.warn('[WebRTCContext] Transceivers may not be fully ready, proceeding anyway');
+          pc.getTransceivers().forEach((t, i) => {
+            if (t.direction !== 'sendrecv' || !t.sender.track) {
+              console.warn(`  Transceiver ${i}: direction=${t.direction}, has sender=${!!t.sender.track}`);
+            }
+          });
+        }
+        
         // Create and send renegotiation offer
         console.log('[WebRTCContext] Creating renegotiation offer...');
         const offer = await pc.createOffer();
