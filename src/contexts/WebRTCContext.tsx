@@ -161,9 +161,150 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
     }
     
     const pc = nativePcRef.current || (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-    if (pc && pc.signalingState !== 'stable') {
-      console.warn('[WebRTCContext] Cannot start monitoring - peer connection not in stable state:', pc.signalingState);
+    if (!pc) {
+      console.error('[WebRTCContext] Cannot start monitoring - no native PC');
       return;
+    }
+    
+    // CRITICAL FIX: Audio m-line is permanently stuck at port 9 in existing PC
+    // This happens because browser's audio transceiver internal state is corrupted
+    // ONLY solution: Destroy existing PC and create completely fresh connection
+    console.log('[WebRTCContext] ⚠️ AUDIO PORT 9 FIX: Destroying existing peer connection to reset audio state...');
+    
+    // Stop all polling before destruction
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (commandPollRef.current) clearInterval(commandPollRef.current);
+    if (answerPollRef.current) clearInterval(answerPollRef.current);
+    
+    // Destroy existing peer
+    try {
+      peerRef.current.destroy();
+    } catch (e) {
+      console.warn('[WebRTCContext] Error destroying old peer:', e);
+    }
+    peerRef.current = null;
+    nativePcRef.current = null;
+    
+    // Create brand new peer connection from scratch
+    console.log('[WebRTCContext] Creating fresh peer connection with clean audio state...');
+    const newPeer = new Peer({
+      initiator: false,
+      trickle: true,
+      streams: [],
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ]
+      }
+    });
+    
+    peerRef.current = newPeer;
+    const newPc = (newPeer as unknown as { _pc?: RTCPeerConnection })?._pc;
+    if (newPc) {
+      nativePcRef.current = newPc;
+    }
+    
+    // Set up event handlers for new peer
+    newPeer.on('signal', async (data: Peer.SignalData) => {
+      console.log('[WebRTCContext] Fresh peer signal event, type:', (data as { type?: string }).type);
+      
+      if ((data as { type?: string }).type === 'answer') {
+        try {
+          const resp = await fetch(`/api/signaling/${roomIdRef.current}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ answer_signal: data }),
+          });
+          console.log('[WebRTCContext] Published fresh peer answer:', resp.status);
+        } catch (e) {
+          console.error('[WebRTCContext] Failed to publish fresh peer answer:', e);
+        }
+      } else if ((data as { candidate?: unknown }).candidate) {
+        try {
+          const resp = await fetch(`/api/signaling/${roomIdRef.current}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              answer_signal: { 
+                type: 'candidate', 
+                candidate: (data as { candidate: unknown }).candidate 
+              } 
+            }),
+          });
+          console.log('[WebRTCContext] Published fresh peer candidate:', resp.status);
+        } catch (e) {
+          console.warn('[WebRTCContext] Failed to publish fresh peer candidate:', e);
+        }
+      }
+    });
+    
+    newPeer.on('connect', () => {
+      console.log('[WebRTCContext] Fresh peer connected!');
+      setConnectionState('connected');
+      setIsPaired(true);
+    });
+    
+    newPeer.on('close', () => {
+      console.log('[WebRTCContext] Fresh peer close event - ignoring (data channel closure)');
+    });
+    
+    newPeer.on('error', (err: Error) => {
+      console.error('[WebRTCContext] Fresh peer error:', err);
+    });
+    
+    // Override destroy method to preserve native PC
+    const originalDestroy = newPeer.destroy.bind(newPeer);
+    newPeer.destroy = () => {
+      console.log('[WebRTCContext] Fresh peer destroy called - preventing native PC close');
+      (newPeer as unknown as { _pc?: RTCPeerConnection })._pc = undefined;
+      originalDestroy();
+    };
+    
+    // Set up ICE handlers on fresh native PC
+    if (newPc) {
+      newPc.oniceconnectionstatechange = () => {
+        console.log('[WebRTCContext] Fresh peer ICE state:', newPc.iceConnectionState);
+        if (newPc.iceConnectionState === 'connected' || newPc.iceConnectionState === 'completed') {
+          console.log('[WebRTCContext] Fresh ICE connected - marking as paired');
+          setConnectionState('connected');
+          setIsPaired(true);
+        }
+      };
+      
+      newPc.onconnectionstatechange = () => {
+        console.log('[WebRTCContext] Fresh peer connection state:', newPc.connectionState);
+      };
+      
+      newPc.onicegatheringstatechange = () => {
+        console.log('[WebRTCContext] Fresh peer ICE gathering state:', newPc.iceGatheringState);
+      };
+      
+      newPc.onicecandidate = async (evt) => {
+        if (evt.candidate) {
+          console.log('[WebRTCContext] Fresh peer ICE candidate: type=', evt.candidate.type);
+          try {
+            const candidateInit: RTCIceCandidateInit = {
+              candidate: evt.candidate.candidate,
+              sdpMid: evt.candidate.sdpMid,
+              sdpMLineIndex: evt.candidate.sdpMLineIndex,
+            };
+            const resp = await fetch(`/api/signaling/${roomIdRef.current}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                answer_signal: {
+                  type: 'candidate',
+                  candidate: candidateInit
+                }
+              }),
+            });
+            console.log('[WebRTCContext] Published fresh peer candidate:', resp.status);
+          } catch (e) {
+            console.warn('[WebRTCContext] Failed to publish fresh peer candidate:', e);
+          }
+        }
+      };
     }
     
     try {
