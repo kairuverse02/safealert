@@ -314,11 +314,13 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       }
       
       // CRITICAL FIX: Strip disabled m-lines (port 9) AND their attributes from offer
-      // This prevents m-line order mismatch and msid attribute errors when Guardian answers
+      // Also rebuild BUNDLE group to avoid "MID matching no m= section" errors
       let cleanedSdp = offer.sdp || '';
       const sdpLines = cleanedSdp.split('\r\n');
       const filteredLines: string[] = [];
       let skipNextAttributes = false;
+      const keptMlines: number[] = []; // Track which m-line indices we're keeping
+      let mlineIndex = 0;
       
       for (let i = 0; i < sdpLines.length; i++) {
         const line = sdpLines[i];
@@ -328,20 +330,43 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           if (line.includes(' 9 ')) {
             console.log('[WebRTCContext] Stripping disabled m-line and its attributes:', line);
             skipNextAttributes = true;
+            mlineIndex++;
             continue;
           } else {
-            // Enabled m-line, keep it and resume adding attributes
+            // Enabled m-line, keep track of its index
             skipNextAttributes = false;
+            keptMlines.push(mlineIndex);
             filteredLines.push(line);
+            mlineIndex++;
           }
         } else if (skipNextAttributes && (line.startsWith('a=') || line.startsWith('c=') || line.startsWith('b='))) {
           // Skip attributes belonging to the disabled m-line
           console.log('[WebRTCContext] Skipping attribute of disabled m-line:', line.substring(0, 50));
           continue;
+        } else if (line.startsWith('a=group:BUNDLE ')) {
+          // Don't add this line yet - we'll rebuild it with only kept m-line indices
+          console.log('[WebRTCContext] Will rebuild BUNDLE group for kept m-lines:', keptMlines);
+          continue;
         } else {
           // Keep all other lines (session-level attributes, etc.)
           filteredLines.push(line);
         }
+      }
+      
+      // Rebuild BUNDLE group with only the kept m-line indices
+      if (keptMlines.length > 0) {
+        const bundleLine = 'a=group:BUNDLE ' + keptMlines.join(' ');
+        // Insert BUNDLE line after session-level lines but before first m-line
+        let insertIndex = 0;
+        for (let i = 0; i < filteredLines.length; i++) {
+          if (filteredLines[i].startsWith('m=')) {
+            insertIndex = i;
+            break;
+          }
+          insertIndex = i + 1;
+        }
+        filteredLines.splice(insertIndex, 0, bundleLine);
+        console.log('[WebRTCContext] Rebuilt BUNDLE line:', bundleLine);
       }
       
       cleanedSdp = filteredLines.join('\r\n');
