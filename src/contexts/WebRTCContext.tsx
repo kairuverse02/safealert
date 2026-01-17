@@ -221,22 +221,45 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         }
       }
       
-      // CRITICAL: Create transceivers for all tracks BEFORE the first createOffer
-      // If we started with no stream, transceivers won't exist yet
-      // This ensures consistent m-line structure across offer/answer negotiations
+      // CRITICAL: Reuse existing transceivers, don't create duplicates
+      // Look for transceivers by checking the m-lines in the current local SDP
+      // This is more reliable than checking track existence (recv-only transceivers have no tracks yet)
       const streamTracks = stream.getTracks();
       console.log(`[WebRTCContext] Ensuring transceivers exist for ${streamTracks.length} track(s)`);
       
+      // Get the current SDP to see what m-lines already exist
+      const currentSdp = pc.localDescription?.sdp || '';
+      const existingMlinesByKind: Record<string, boolean> = { video: false, audio: false };
+      currentSdp.split('\r\n').forEach(line => {
+        if (line.startsWith('m=video ')) existingMlinesByKind.video = true;
+        if (line.startsWith('m=audio ')) existingMlinesByKind.audio = true;
+      });
+      console.log(`[WebRTCContext] Existing m-lines in SDP:`, existingMlinesByKind);
+      
       for (const track of streamTracks) {
-        let transceiver = pc.getTransceivers().find(t => 
-          (t.receiver?.track?.kind === track.kind) || 
-          (t.sender?.track?.kind === track.kind)
-        );
-        
-        if (!transceiver) {
-          // No transceiver for this track kind - create one
-          console.log(`[WebRTCContext] Creating new transceiver for ${track.kind}`);
-          transceiver = pc.addTransceiver(track, {
+        if (existingMlinesByKind[track.kind]) {
+          // This kind already has an m-line, find and reuse its transceiver
+          const transceiver = pc.getTransceivers().find(t => {
+            const receiverKind = t.receiver?.track?.kind;
+            const senderKind = t.sender?.track?.kind;
+            return receiverKind === track.kind || senderKind === track.kind;
+          });
+          
+          if (transceiver) {
+            console.log(`[WebRTCContext] Reusing existing transceiver for ${track.kind}`);
+          } else {
+            console.warn(`[WebRTCContext] Expected transceiver for ${track.kind} but not found - creating new one`);
+            pc.addTransceiver(track, {
+              direction: 'sendrecv',
+              sendEncodings: track.kind === 'video' 
+                ? [{ maxBitrate: 2500000 }] 
+                : undefined
+            });
+          }
+        } else {
+          // No m-line yet for this kind, create transceiver
+          console.log(`[WebRTCContext] Creating new transceiver for ${track.kind} (no existing m-line)`);
+          pc.addTransceiver(track, {
             direction: 'sendrecv',
             sendEncodings: track.kind === 'video' 
               ? [{ maxBitrate: 2500000 }] 
