@@ -335,6 +335,34 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
                   if (pc.signalingState === 'have-local-offer') {
                     console.log('[WebRTCContext] Received guardian answer, applying (signalingState: have-local-offer)');
                     console.log('[WebRTCContext] Guardian answer SDP m-lines:', answer.sdp.split('\r\n').filter((line: string) => line.startsWith('m=')).join(', '));
+                    
+                    // --- FIX START: Patch Answer SDP mismatch ---
+                    if (pc.localDescription) {
+                      const offerSdp = pc.localDescription.sdp;
+                      const answerSdp = answer.sdp as string;
+
+                      // Count m-lines
+                      const offerMLines = (offerSdp.match(/^m=/gm) || []).length;
+                      const answerMLines = (answerSdp.match(/^m=/gm) || []).length;
+
+                      if (answerMLines < offerMLines) {
+                        console.warn(`[WebRTCContext] ⚠️ M-Line Mismatch! Offer: ${offerMLines}, Answer: ${answerMLines}. Patching answer...`);
+                        
+                        let patchedSdp = answerSdp.trim();
+                        const missingCount = offerMLines - answerMLines;
+
+                        // Append rejected m-lines (port 0) to satisfy WebRTC requirements
+                        for (let i = 0; i < missingCount; i++) {
+                          // We append a dummy audio line with port 0 (rejected)
+                          patchedSdp += "\r\nm=audio 0 UDP/TLS/RTP/SAVPF 111";
+                        }
+                        
+                        answer.sdp = patchedSdp;
+                        console.log('[WebRTCContext] ✅ Answer SDP patched successfully.');
+                      }
+                    }
+                    // --- FIX END ---
+                    
                     lastAppliedAnswerSdp = answer.sdp;
                     
                     await pc.setRemoteDescription(new RTCSessionDescription(answer));
