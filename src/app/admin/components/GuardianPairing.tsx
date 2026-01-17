@@ -227,6 +227,10 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
       trickle: true,
       stream: localStream,
       channelConfig: { negotiated: true, id: 0 }, // Pre-negotiated channel prevents WebRTC from negotiating it
+      offerOptions: {
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      },
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
