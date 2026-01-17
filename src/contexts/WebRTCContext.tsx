@@ -165,148 +165,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       console.error('[WebRTCContext] Cannot start monitoring - no native PC');
       return;
     }
-    
-    // CRITICAL FIX: Audio m-line is permanently stuck at port 9 in existing PC
-    // This happens because browser's audio transceiver internal state is corrupted
-    // ONLY solution: Destroy existing PC and create completely fresh connection
-    console.log('[WebRTCContext] ⚠️ AUDIO PORT 9 FIX: Destroying existing peer connection to reset audio state...');
-    
-    // Stop all polling before destruction
-    if (pollRef.current) clearInterval(pollRef.current);
-    if (commandPollRef.current) clearInterval(commandPollRef.current);
-    if (answerPollRef.current) clearInterval(answerPollRef.current);
-    
-    // Destroy existing peer
-    try {
-      peerRef.current.destroy();
-    } catch (e) {
-      console.warn('[WebRTCContext] Error destroying old peer:', e);
-    }
-    peerRef.current = null;
-    nativePcRef.current = null;
-    
-    // Create brand new peer connection from scratch
-    console.log('[WebRTCContext] Creating fresh peer connection with clean audio state...');
-    const newPeer = new Peer({
-      initiator: false,
-      trickle: true,
-      streams: [],
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-        ]
-      }
-    });
-    
-    peerRef.current = newPeer;
-    const newPc = (newPeer as unknown as { _pc?: RTCPeerConnection })?._pc;
-    if (newPc) {
-      nativePcRef.current = newPc;
-    }
-    
-    // Set up event handlers for new peer
-    newPeer.on('signal', async (data: Peer.SignalData) => {
-      console.log('[WebRTCContext] Fresh peer signal event, type:', (data as { type?: string }).type);
-      
-      if ((data as { type?: string }).type === 'answer') {
-        try {
-          const resp = await fetch(`/api/signaling/${roomIdRef.current}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ answer_signal: data }),
-          });
-          console.log('[WebRTCContext] Published fresh peer answer:', resp.status);
-        } catch (e) {
-          console.error('[WebRTCContext] Failed to publish fresh peer answer:', e);
-        }
-      } else if ((data as { candidate?: unknown }).candidate) {
-        try {
-          const resp = await fetch(`/api/signaling/${roomIdRef.current}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              answer_signal: { 
-                type: 'candidate', 
-                candidate: (data as { candidate: unknown }).candidate 
-              } 
-            }),
-          });
-          console.log('[WebRTCContext] Published fresh peer candidate:', resp.status);
-        } catch (e) {
-          console.warn('[WebRTCContext] Failed to publish fresh peer candidate:', e);
-        }
-      }
-    });
-    
-    newPeer.on('connect', () => {
-      console.log('[WebRTCContext] Fresh peer connected!');
-      setConnectionState('connected');
-      setIsPaired(true);
-    });
-    
-    newPeer.on('close', () => {
-      console.log('[WebRTCContext] Fresh peer close event - ignoring (data channel closure)');
-    });
-    
-    newPeer.on('error', (err: Error) => {
-      console.error('[WebRTCContext] Fresh peer error:', err);
-    });
-    
-    // Override destroy method to preserve native PC
-    const originalDestroy = newPeer.destroy.bind(newPeer);
-    newPeer.destroy = () => {
-      console.log('[WebRTCContext] Fresh peer destroy called - preventing native PC close');
-      (newPeer as unknown as { _pc?: RTCPeerConnection })._pc = undefined;
-      originalDestroy();
-    };
-    
-    // Set up ICE handlers on fresh native PC
-    if (newPc) {
-      newPc.oniceconnectionstatechange = () => {
-        console.log('[WebRTCContext] Fresh peer ICE state:', newPc.iceConnectionState);
-        if (newPc.iceConnectionState === 'connected' || newPc.iceConnectionState === 'completed') {
-          console.log('[WebRTCContext] Fresh ICE connected - marking as paired');
-          setConnectionState('connected');
-          setIsPaired(true);
-        }
-      };
-      
-      newPc.onconnectionstatechange = () => {
-        console.log('[WebRTCContext] Fresh peer connection state:', newPc.connectionState);
-      };
-      
-      newPc.onicegatheringstatechange = () => {
-        console.log('[WebRTCContext] Fresh peer ICE gathering state:', newPc.iceGatheringState);
-      };
-      
-      newPc.onicecandidate = async (evt) => {
-        if (evt.candidate) {
-          console.log('[WebRTCContext] Fresh peer ICE candidate: type=', evt.candidate.type);
-          try {
-            const candidateInit: RTCIceCandidateInit = {
-              candidate: evt.candidate.candidate,
-              sdpMid: evt.candidate.sdpMid,
-              sdpMLineIndex: evt.candidate.sdpMLineIndex,
-            };
-            const resp = await fetch(`/api/signaling/${roomIdRef.current}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                answer_signal: {
-                  type: 'candidate',
-                  candidate: candidateInit
-                }
-              }),
-            });
-            console.log('[WebRTCContext] Published fresh peer candidate:', resp.status);
-          } catch (e) {
-            console.warn('[WebRTCContext] Failed to publish fresh peer candidate:', e);
-          }
-        }
-      };
-    }
-    
+
     try {
       // Get media stream with video + audio
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -323,154 +182,128 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         setIsMonitoringActive(true);
       }
       
-      // Add tracks to peer connection
-      const pc = nativePcRef.current || (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-      console.log('[WebRTCContext] Peer ref exists:', !!peerRef.current, 'Native PC exists:', !!pc);
+      // Add tracks to the EXISTING peer connection (not a new one)
+      // This preserves the m-line order from the initial negotiation
+      console.log('[WebRTCContext] Adding tracks to existing peer connection...');
       
-      if (pc) {
-        console.log('[WebRTCContext] PC signaling state:', pc.signalingState, 'connection state:', pc.connectionState);
+      if (pc.signalingState === 'closed') {
+        console.error('[WebRTCContext] Cannot add tracks - PC is closed');
+        return;
+      }
+      
+      // Wait for stable signaling state if needed
+      if (pc.signalingState !== 'stable') {
+        console.log('[WebRTCContext] Waiting for stable signaling state..., current:', pc.signalingState);
+        let isClosed = false;
+        await new Promise<void>((resolve) => {
+          let attempts = 0;
+          const check = setInterval(() => {
+            attempts++;
+            if (pc.signalingState === 'stable') {
+              clearInterval(check);
+              resolve();
+            } else if (pc.signalingState === 'closed' || attempts >= 100) {
+              isClosed = (pc.signalingState === 'closed');
+              clearInterval(check);
+              resolve();
+            }
+          }, 100);
+        });
         
-        // Check if PC is closed
-        if (pc.signalingState === 'closed') {
-          console.error('[WebRTCContext] Cannot add tracks - PC is closed before we could start');
+        if (isClosed) {
+          console.error('[WebRTCContext] PC closed while waiting for stable state');
           return;
         }
-        
-        console.log('[WebRTCContext] Adding tracks to peer connection...');
-        
-        // Wait for stable connection state
-        if (pc.signalingState !== 'stable') {
-          console.log('[WebRTCContext] Waiting for stable signaling state..., current:', pc.signalingState);
-          let isClosed = false;
-          await new Promise<void>((resolve) => {
-            let attempts = 0;
-            const check = setInterval(() => {
-              attempts++;
-              console.log('[WebRTCContext] Signaling state check attempt', attempts, ':', pc.signalingState);
-              if (pc.signalingState === 'stable') {
-                clearInterval(check);
-                resolve();
-              } else if (pc.signalingState === 'closed' || attempts >= 100) {
-                isClosed = (pc.signalingState === 'closed');
-                clearInterval(check);
-                resolve();
-              }
-            }, 100);
-          });
+      }
+      
+      // Add tracks via addTrack() - this will preserve m-line order for renegotiation
+      const tracksToAdd = stream.getTracks();
+      console.log(`[WebRTCContext] Adding ${tracksToAdd.length} tracks:`, tracksToAdd.map(t => `${t.kind}(${t.id})`).join(', '));
+      
+      tracksToAdd.forEach((track) => {
+        pc.addTrack(track, stream);
+        if (track.kind === 'video') {
+          const settings = track.getSettings();
+          console.log(`[WebRTCContext] Video track: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
           
-          // Check if PC closed during wait
-          if (isClosed) {
-            console.error('[WebRTCContext] PC closed while waiting for stable state');
-            return;
-          }
-        }
-        
-        // FIX: Switch to addTrack() API instead of replaceTrack()
-        // addTrack() bypasses transceiver state issues and may generate cleaner SDP with real ports
-        const tracksToAdd = stream.getTracks();
-        console.log(`[WebRTCContext] Using addTrack() API - Stream has ${tracksToAdd.length} tracks:`, tracksToAdd.map(t => `${t.kind}(${t.id})`).join(', '));
-        
-        // Stop/clean all existing transceivers to avoid duplication
-        const existingTransceivers = pc.getTransceivers();
-        console.log('[WebRTCContext] Stopping existing transceivers before addTrack()...');
-        existingTransceivers.forEach((t, idx) => {
-          const kind = t.sender.track?.kind || t.receiver.track?.kind;
-          console.log(`  Stopping transceiver ${idx} (${kind}): mid=${t.mid}, direction=${t.direction}`);
-          if (t.direction !== 'inactive') {
-            t.direction = 'inactive';
-          }
-        });
-        
-        // Now add tracks using addTrack() - this should generate clean m-lines
-        console.log('[WebRTCContext] Adding tracks via addTrack()...');
-        tracksToAdd.forEach((track) => {
-          console.log(`[WebRTCContext] addTrack() - ${track.kind} (id=${track.id}, enabled=${track.enabled})`);
-          pc.addTrack(track, stream);
-          if (track.kind === 'video') {
-            const settings = track.getSettings();
-            console.log(`[WebRTCContext] Video track settings: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
-            
-            // Check WebRTC send stats every 3s
-            const statsInterval = setInterval(async () => {
-              if (track.readyState !== 'live') {
-                clearInterval(statsInterval);
-                return;
-              }
-              try {
-                const stats = await pc.getStats(track);
-                stats.forEach((report) => {
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  const r = report as any;
-                  if (r.type === 'outbound-rtp' && r.kind === 'video') {
-                    console.log(`[WebRTCContext] Video send stats: ${r.framesSent || 0} frames sent, ${r.bytesSent || 0} bytes, ${r.framesPerSecond || 0} fps`);
-                  }
-                });
-              } catch (e) {
-                console.warn('[WebRTCContext] Failed to get stats:', e);
-              }
-            }, 3000);
-          }
-        });
-        
-        // Wait a bit for addTrack() to update transceiver state
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        const transceivers = pc.getTransceivers();
-        console.log('[WebRTCContext] Transceiver state after addTrack():');
-        transceivers.forEach((t, i) => {
-          const kind = t.sender.track?.kind || t.receiver.track?.kind;
-          console.log(`  Transceiver ${i} (${kind}): direction=${t.direction}, mid=${t.mid}, sender.track=${!!t.sender.track}`);
-        });
-        
-        // Create and send renegotiation offer
-        // **FIX: Loop until audio m-line has real port (not 9)**
-        console.log('[WebRTCContext] Creating renegotiation offer with addTrack()...');
-        let offer = await pc.createOffer();
-        let attemptCount = 0;
-        const maxAttempts = 10;
-        
-        while (attemptCount < maxAttempts && offer.sdp && offer.sdp.includes('m=audio 9')) {
-          attemptCount++;
-          console.warn(`[WebRTCContext] Audio m-line stuck at port 9 (attempt ${attemptCount}/${maxAttempts}), retrying createOffer()...`);
-          
-          // Small delay between retries
-          await new Promise(resolve => setTimeout(resolve, 50));
-          offer = await pc.createOffer();
-        }
-        
-        
-        if (attemptCount > 0 && attemptCount < maxAttempts) {
-          console.log(`[WebRTCContext] ✅ Audio m-line regenerated after ${attemptCount} attempt(s)`);
-        } else if (attemptCount >= maxAttempts) {
-          console.error('[WebRTCContext] ❌ Audio m-line still port 9 after max attempts, proceeding anyway');
-        }
-        
-        if (offer.sdp) {
-          console.log('[WebRTCContext] Renegotiation offer m-lines:', offer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
-        }
-        await pc.setLocalDescription(offer);
-        console.log('[WebRTCContext] Renegotiation offer sent, signalingState:', pc.signalingState);
-        
-        // Send offer to guardian via API
-        const roomId = roomIdRef.current || currentRoomId;
-        console.log('[WebRTCContext] Using room ID for renegotiation:', roomId);
-        if (roomId) {
-          try {
-            const resp = await fetch(`/api/signaling/${roomId}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ offer_signal: offer }),
-            });
-            console.log('[WebRTCContext] Sent renegotiation offer:', resp.status);
-            
-            if (!resp.ok) {
-              const errorText = await resp.text();
-              console.error('[WebRTCContext] Failed to send renegotiation offer:', resp.status, errorText);
+          // Monitor video send stats
+          const statsInterval = setInterval(async () => {
+            if (track.readyState !== 'live') {
+              clearInterval(statsInterval);
+              return;
             }
-            
-            // Poll for guardian's answer
-            if (resp.ok) {
-              console.log('[WebRTCContext] Polling for guardian answer to renegotiation');
+            try {
+              const stats = await pc.getStats(track);
+              stats.forEach((report) => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const r = report as any;
+                if (r.type === 'outbound-rtp' && r.kind === 'video') {
+                  console.log(`[WebRTCContext] Video send stats: ${r.framesSent || 0} frames sent, ${r.bytesSent || 0} bytes, ${r.framesPerSecond || 0} fps`);
+                }
+              });
+            } catch (e) {
+              console.warn('[WebRTCContext] Failed to get stats:', e);
+            }
+          }, 3000);
+        }
+      });
+      
+      // Wait for transceivers to be created
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const transceivers = pc.getTransceivers();
+      console.log('[WebRTCContext] Transceiver state after addTrack():');
+      transceivers.forEach((t, i) => {
+        const kind = t.sender.track?.kind || t.receiver.track?.kind;
+        console.log(`  Transceiver ${i} (${kind}): direction=${t.direction}, mid=${t.mid}, sender.track=${!!t.sender.track}`);
+      });
+      
+      // Create renegotiation offer
+      console.log('[WebRTCContext] Creating renegotiation offer...');
+      let offer = await pc.createOffer();
+      let attemptCount = 0;
+      const maxAttempts = 10;
+      
+      while (attemptCount < maxAttempts && offer.sdp && offer.sdp.includes('m=audio 9')) {
+        attemptCount++;
+        console.warn(`[WebRTCContext] Audio m-line stuck at port 9 (attempt ${attemptCount}/${maxAttempts}), retrying createOffer()...`);
+        await new Promise(resolve => setTimeout(resolve, 50));
+        offer = await pc.createOffer();
+      }
+      
+      if (attemptCount > 0 && attemptCount < maxAttempts) {
+        console.log(`[WebRTCContext] ✅ Audio m-line regenerated after ${attemptCount} attempt(s)`);
+      } else if (attemptCount >= maxAttempts) {
+        console.error('[WebRTCContext] ❌ Audio m-line still port 9 after max attempts, proceeding anyway');
+      }
+      
+      if (offer.sdp) {
+        console.log('[WebRTCContext] Renegotiation offer m-lines:', offer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
+      }
+      
+      await pc.setLocalDescription(offer);
+      console.log('[WebRTCContext] Renegotiation offer sent, signalingState:', pc.signalingState);
+      
+      // Send offer to guardian via API
+      const roomId = roomIdRef.current || currentRoomId;
+      console.log('[WebRTCContext] Using room ID for renegotiation:', roomId);
+      if (roomId) {
+        try {
+          const resp = await fetch(`/api/signaling/${roomId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ offer_signal: offer }),
+          });
+          console.log('[WebRTCContext] Sent renegotiation offer:', resp.status);
+          
+          if (!resp.ok) {
+            const errorText = await resp.text();
+            console.error('[WebRTCContext] Failed to send renegotiation offer:', resp.status, errorText);
+          }
+          
+          // Poll for guardian's answer
+          if (resp.ok) {
+            console.log('[WebRTCContext] Polling for guardian answer to renegotiation');
             let lastAppliedAnswerSdp: string | null = null;
             if (answerPollRef.current) clearInterval(answerPollRef.current);
             
@@ -483,51 +316,27 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
                 console.log('[WebRTCContext] Answer poll result:', { hasAnswer: !!answer, answerType: answer?.type, hasSdp: !!answer?.sdp, signalingState: pc.signalingState });
                 
                 if (answer && answer.type === 'answer' && answer.sdp && answer.sdp !== lastAppliedAnswerSdp) {
-                  // Only apply answer if PC is in "have-local-offer" state (we sent offer, waiting for answer)
+                  // Only apply answer if PC is in "have-local-offer" state
                   if (pc.signalingState === 'have-local-offer') {
                     console.log('[WebRTCContext] Received guardian answer, applying (signalingState: have-local-offer)');
                     console.log('[WebRTCContext] Guardian answer SDP m-lines:', answer.sdp.split('\r\n').filter((line: string) => line.startsWith('m=')).join(', '));
                     lastAppliedAnswerSdp = answer.sdp;
                     
-                    // Log transceiver state BEFORE applying answer
-                    const transceiversBefore = pc.getTransceivers();
-                    transceiversBefore.forEach((t, idx) => {
-                      console.log(`[WebRTCContext] BEFORE answer - Transceiver ${idx}: mid=${t.mid} sender.transport=${t.sender.transport?.state}`);
-                    });
-                    
                     await pc.setRemoteDescription(new RTCSessionDescription(answer));
                     console.log('[WebRTCContext] Renegotiation complete');
-                    console.log('[WebRTCContext] PC state after answer - signalingState:', pc.signalingState, 'connectionState:', pc.connectionState, 'iceConnectionState:', pc.iceConnectionState);
+                    console.log('[WebRTCContext] PC state after answer - signalingState:', pc.signalingState, 'connectionState:', pc.connectionState);
                     
-                    // Check transceiver sender state after renegotiation
-                    const transceivers = pc.getTransceivers();
-                    transceivers.forEach((t, idx) => {
-                      console.log(`[WebRTCContext] AFTER answer - Transceiver ${idx}: mid=${t.mid} sender.kind=${t.sender.track?.kind} sender.track=${!!t.sender.track} receiver.kind=${t.receiver.track?.kind}`);
-                      
-                      // Check RTP sender transport state
-                      const sender = t.sender;
-                      console.log(`[WebRTCContext] AFTER answer - Transceiver ${idx} sender state: transport=${sender.transport?.state}`);
-                      
-                      // Check if sender has active parameters
-                      if (sender.track) {
-                        console.log(`[WebRTCContext] AFTER answer - Transceiver ${idx} track: kind=${sender.track.kind} enabled=${sender.track.enabled} readyState=${sender.track.readyState} muted=${sender.track.muted}`);
-                      }
-                    });
-                    
-                    // Stop polling after receiving answer
+                    // Stop polling
                     if (answerPollRef.current) {
                       clearInterval(answerPollRef.current);
                       answerPollRef.current = null;
                     }
                   } else if (pc.signalingState === 'stable') {
                     console.log('[WebRTCContext] Answer received but PC is stable, renegotiation already complete');
-                    // Stop polling - answer was already applied
                     if (answerPollRef.current) {
                       clearInterval(answerPollRef.current);
                       answerPollRef.current = null;
                     }
-                  } else {
-                    console.log('[WebRTCContext] Answer received but PC in unexpected state:', pc.signalingState);
                   }
                 } else if (answer && answer.sdp === lastAppliedAnswerSdp) {
                   console.log('[WebRTCContext] Answer SDP already applied, skipping');
@@ -536,14 +345,9 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
                 console.warn('[WebRTCContext] Answer poll error:', e);
               }
             }, 1000);
-            } else {
-              console.error('[WebRTCContext] Cannot start answer poll - offer request was not ok');
-            }
-          } catch (e) {
-            console.error('[WebRTCContext] Error sending renegotiation offer:', e);
           }
-        } else {
-          console.error('[WebRTCContext] Cannot send renegotiation offer - no room ID');
+        } catch (e) {
+          console.error('[WebRTCContext] Error sending renegotiation offer:', e);
         }
       }
       
