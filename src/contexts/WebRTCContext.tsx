@@ -383,8 +383,27 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         });
         
         // Create and send renegotiation offer
+        // **FIX: Loop until audio m-line has real port (not 9)**
         console.log('[WebRTCContext] Creating renegotiation offer...');
-        const offer = await pc.createOffer();
+        let offer = await pc.createOffer();
+        let attemptCount = 0;
+        const maxAttempts = 10;
+        
+        while (attemptCount < maxAttempts && offer.sdp && offer.sdp.includes('m=audio 9')) {
+          attemptCount++;
+          console.warn(`[WebRTCContext] Audio m-line stuck at port 9 (attempt ${attemptCount}/${maxAttempts}), retrying createOffer()...`);
+          
+          // Small delay between retries
+          await new Promise(resolve => setTimeout(resolve, 50));
+          offer = await pc.createOffer();
+        }
+        
+        if (attemptCount > 0 && attemptCount < maxAttempts) {
+          console.log(`[WebRTCContext] ✅ Audio m-line regenerated after ${attemptCount} attempt(s)`);
+        } else if (attemptCount >= maxAttempts) {
+          console.error('[WebRTCContext] ❌ Audio m-line still port 9 after max attempts, proceeding anyway');
+        }
+        
         if (offer.sdp) {
           console.log('[WebRTCContext] Renegotiation offer m-lines:', offer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
         }
