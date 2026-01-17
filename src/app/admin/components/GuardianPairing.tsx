@@ -427,7 +427,29 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                           if (newOffer && newOffer.type === 'offer' && peerRef.current) {
                             const offerSdp = newOffer.sdp;
                             if (offerSdp && offerSdp !== lastProcessedOfferSdpRef.current) {
-                              console.log('Guardian: received NEW renegotiation offer, signaling peer');
+                              console.log('Guardian: received NEW renegotiation offer, ensuring transceivers are sendrecv BEFORE processing');
+                              
+                              // CRITICAL: Before simple-peer processes this offer and creates an answer,
+                              // we MUST ensure all transceivers are in sendrecv state
+                              try {
+                                const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+                                if (pc) {
+                                  const transceivers = pc.getTransceivers();
+                                  console.log('Guardian: Ensuring transceivers sendrecv before renegotiation answer. Count:', transceivers.length);
+                                  for (const transceiver of transceivers) {
+                                    if ((transceiver.receiver?.track?.kind === 'video' || transceiver.receiver?.track?.kind === 'audio' ||
+                                         transceiver.sender?.track?.kind === 'video' || transceiver.sender?.track?.kind === 'audio') &&
+                                        transceiver.direction !== 'sendrecv') {
+                                      const oldDirection = transceiver.direction;
+                                      transceiver.direction = 'sendrecv';
+                                      console.log(`Guardian: Updated transceiver direction to sendrecv (was ${oldDirection})`);
+                                    }
+                                  }
+                                }
+                              } catch (err) {
+                                console.warn('Guardian: failed to update transceivers before renegotiation', err);
+                              }
+                              
                               lastProcessedOfferSdpRef.current = offerSdp;
                               
                               peerRef.current.signal(newOffer);
@@ -780,6 +802,27 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           if (offer && peerRef.current && offer.type === 'offer' && offer.sdp) {
             try {
               console.log('[REALTIME] Received renegotiation offer from dependent during monitoring');
+              
+              // CRITICAL: Before simple-peer processes this offer and creates an answer,
+              // we MUST ensure all transceivers are in sendrecv state
+              try {
+                const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+                if (pc) {
+                  const transceivers = pc.getTransceivers();
+                  console.log('[REALTIME] Ensuring transceivers sendrecv before answer. Count:', transceivers.length);
+                  for (const transceiver of transceivers) {
+                    if ((transceiver.receiver?.track?.kind === 'video' || transceiver.receiver?.track?.kind === 'audio' ||
+                         transceiver.sender?.track?.kind === 'video' || transceiver.sender?.track?.kind === 'audio') &&
+                        transceiver.direction !== 'sendrecv') {
+                      const oldDirection = transceiver.direction;
+                      transceiver.direction = 'sendrecv';
+                      console.log(`[REALTIME] Updated transceiver direction to sendrecv (was ${oldDirection})`);
+                    }
+                  }
+                }
+              } catch (err) {
+                console.warn('[REALTIME] failed to update transceivers before answer', err);
+              }
               
               // Signal the offer to simple-peer, which will trigger answer generation
               peerRef.current.signal(offer as Peer.SignalData | string);
