@@ -335,9 +335,9 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           
           // Only cleanup disabled m-lines for INITIAL answer, not renegotiation answers.
           // During renegotiation, the answer SDP should match the offer's m-line structure automatically.
-          // If peer is already connected, this is a renegotiation, not initial setup.
-          const isRenegotiation = peerRef.current?.connected || false;
-          console.log('Guardian: Is renegotiation?', isRenegotiation, 'Peer connected:', peerRef.current?.connected);
+          // Detect renegotiation by checking if we've already applied an initial answer.
+          const isRenegotiation = hasAppliedAnswerRef.current;
+          console.log('Guardian: Is renegotiation?', isRenegotiation, 'Has applied initial answer:', hasAppliedAnswerRef.current);
           
           if (!isRenegotiation && answerToSend && typeof answerToSend.sdp === 'string') {
             // INITIAL ANSWER ONLY: Strip disabled m-lines (port 9) AND their attributes
