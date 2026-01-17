@@ -232,6 +232,12 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         const tracksToAdd = stream.getTracks();
         console.log(`[WebRTCContext] Stream has ${tracksToAdd.length} tracks to add:`, tracksToAdd.map(t => `${t.kind}(${t.id})`).join(', '));
         
+        // Debug: Log existing transceiver state BEFORE processing
+        console.log('[WebRTCContext] Existing transceivers BEFORE track processing:');
+        existingTransceivers.forEach((t, idx) => {
+          console.log(`  Transceiver ${idx}: direction=${t.direction}, receiver.track=${!!t.receiver.track} (kind=${t.receiver.track?.kind}), sender.track=${!!t.sender.track}`);
+        });
+        
         // CRITICAL: Use Promise.all to wait for ALL track replacements to complete
         // This ensures the transceivers are fully updated before creating the offer
         const trackReplacementPromises = tracksToAdd.map(async (track) => {
@@ -239,10 +245,11 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             console.log(`[WebRTCContext] Processing ${track.kind} track (id=${track.id}, enabled=${track.enabled}, readyState=${track.readyState})`);
             
             // Try to find a transceiver of the same kind that can be reused
-            const matchingTransceiver = existingTransceivers.find(t => 
-              t.receiver.track?.kind === track.kind && 
-              !t.sender.track  // Only reuse if sender hasn't been set yet
-            );
+            const matchingTransceiver = existingTransceivers.find(t => {
+              const match = t.receiver.track?.kind === track.kind && !t.sender.track;
+              console.log(`  Checking transceiver: receiver.kind=${t.receiver.track?.kind}, has_sender=${!!t.sender.track}, matches=${match}`);
+              return match;
+            });
             
             if (matchingTransceiver) {
               console.log(`[WebRTCContext] Found matching ${track.kind} transceiver (mid=${matchingTransceiver.mid}, direction=${matchingTransceiver.direction})`);
@@ -365,6 +372,15 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             console.warn(`  Transceiver ${idx}: direction=${t.direction} (expected sendrecv), sender.track=${!!t.sender.track} (expected true), kind=${t.sender.track?.kind || 'none'}`);
           });
         }
+        
+        // WORKAROUND: Force direction re-assignment to trigger SDP regeneration
+        // Some browsers don't regenerate SDP if state changed asynchronously
+        console.log('[WebRTCContext] Force-refreshing transceiver directions before offer creation...');
+        mediaTransceivers.forEach(t => {
+          const oldDir = t.direction;
+          t.direction = 'sendrecv';
+          console.log(`  [Force-refresh] transceiver direction=${oldDir} → ${t.direction}`);
+        });
         
         // Create and send renegotiation offer
         console.log('[WebRTCContext] Creating renegotiation offer...');
