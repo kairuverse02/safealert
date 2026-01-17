@@ -465,30 +465,43 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                   if ((!hasAppliedAnswerRef.current && !applyingAnswerRef.current) || (sdp && lastAppliedAnswerSdpRef.current !== sdp && !applyingAnswerRef.current)) {
                     applyingAnswerRef.current = true;
                     try {
-                      console.log('Guardian: found answer via poll (sdp present), signaling peer', ans);
+                      const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+                      // CRITICAL: Only apply answer if PC is in the correct state
+                      // - For initial answer: must be "have-remote-offer"
+                      // - For renegotiation answer: must be "have-local-offer"
+                      // If PC is already "stable", the answer was likely applied via realtime signal handler
+                      const signalingState = pc?.signalingState;
+                      const shouldApply = signalingState === 'have-remote-offer' || signalingState === 'have-local-offer';
+                      
+                      if (!shouldApply) {
+                        console.log(`Guardian: skipping answer application - PC in ${signalingState} state (not have-remote-offer or have-local-offer), likely already applied via realtime`);
+                        hasAppliedAnswerRef.current = true;
+                        lastAppliedAnswerSdpRef.current = sdp;
+                      } else {
+                        console.log('Guardian: found answer via poll (sdp present), signaling peer', ans);
 
-                      // If the answer includes a transceiver request for video, attempt to add a recvonly transceiver
-                      try {
-                        const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                        const req = (ans && (ans.transceiverRequest || (Array.isArray(ans.transceiverRequests) ? ans.transceiverRequests[0] : null)));
-                        if (pc && req && (req.kind === 'video' || req.kind === 'audio')) {
-                          console.log('Guardian: answer requests transceiver for', req.kind, ', adding recvonly transceiver on PC');
-                          if (typeof pc.addTransceiver === 'function') {
-                            try {
-                              pc.addTransceiver(req.kind, { direction: 'recvonly' });
-                              console.log(`Guardian: added recvonly ${req.kind} transceiver`);
-                            } catch (e) {
-                              console.warn('Guardian: addTransceiver failed for', req.kind, e);
+                        // If the answer includes a transceiver request for video, attempt to add a recvonly transceiver
+                        try {
+                          const req = (ans && (ans.transceiverRequest || (Array.isArray(ans.transceiverRequests) ? ans.transceiverRequests[0] : null)));
+                          if (pc && req && (req.kind === 'video' || req.kind === 'audio')) {
+                            console.log('Guardian: answer requests transceiver for', req.kind, ', adding recvonly transceiver on PC');
+                            if (typeof pc.addTransceiver === 'function') {
+                              try {
+                                pc.addTransceiver(req.kind, { direction: 'recvonly' });
+                                console.log(`Guardian: added recvonly ${req.kind} transceiver`);
+                              } catch (e) {
+                                console.warn('Guardian: addTransceiver failed for', req.kind, e);
+                              }
                             }
                           }
+                        } catch (_e) {
+                          console.warn('Guardian: failed to add recv transceiver', _e);
                         }
-                      } catch (_e) {
-                        console.warn('Guardian: failed to add recv transceiver', _e);
-                      }
 
-                      peerRef.current.signal(ans);
-                      hasAppliedAnswerRef.current = true;
-                      lastAppliedAnswerSdpRef.current = sdp;
+                        peerRef.current.signal(ans);
+                        hasAppliedAnswerRef.current = true;
+                        lastAppliedAnswerSdpRef.current = sdp;
+                      }
                     } catch (err) {
                       console.warn('Guardian: failed to apply polled answer', err);
                     } finally {
