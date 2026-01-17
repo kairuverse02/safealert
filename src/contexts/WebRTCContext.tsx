@@ -228,13 +228,15 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       console.log(`[WebRTCContext] Ensuring transceivers exist for ${streamTracks.length} track(s)`);
       
       // Get the current SDP to see what m-lines already exist
+      // CRITICAL: Only count ACTIVE m-lines (not disabled ones with port 9)
       const currentSdp = pc.localDescription?.sdp || '';
       const existingMlinesByKind: Record<string, boolean> = { video: false, audio: false };
       currentSdp.split('\r\n').forEach(line => {
-        if (line.startsWith('m=video ')) existingMlinesByKind.video = true;
-        if (line.startsWith('m=audio ')) existingMlinesByKind.audio = true;
+        // Only count m-lines with real ports (not port 9 which means disabled/ghost)
+        if (line.startsWith('m=video ') && !line.startsWith('m=video 9 ')) existingMlinesByKind.video = true;
+        if (line.startsWith('m=audio ') && !line.startsWith('m=audio 9 ')) existingMlinesByKind.audio = true;
       });
-      console.log(`[WebRTCContext] Existing m-lines in SDP:`, existingMlinesByKind);
+      console.log(`[WebRTCContext] Existing ACTIVE m-lines in SDP:`, existingMlinesByKind);
       
       for (const track of streamTracks) {
         if (existingMlinesByKind[track.kind]) {
@@ -327,14 +329,14 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       // Create renegotiation offer
       console.log('[WebRTCContext] Creating renegotiation offer...');
       
-      // CRITICAL: Ensure ALL transceivers are in sendrecv before createOffer
-      // so the offer will have real ports instead of disabled m-lines
+      // CRITICAL: Ensure transceivers with actual tracks are in sendrecv before createOffer
+      // Only include transceivers that have tracks (not the ghost recv-only ones)
       const allTransceivers = pc.getTransceivers();
-      console.log('[WebRTCContext] Ensuring all transceivers are sendrecv before createOffer. Count:', allTransceivers.length);
+      console.log('[WebRTCContext] Ensuring active transceivers are sendrecv before createOffer. Count:', allTransceivers.length);
       for (const transceiver of allTransceivers) {
-        if ((transceiver.receiver?.track?.kind === 'video' || transceiver.receiver?.track?.kind === 'audio' ||
-             transceiver.sender?.track?.kind === 'video' || transceiver.sender?.track?.kind === 'audio') &&
-            transceiver.direction !== 'sendrecv') {
+        // Only modify transceivers that have actual tracks (sender or receiver)
+        const hasTrack = !!transceiver.sender?.track || !!transceiver.receiver?.track;
+        if (hasTrack && transceiver.direction !== 'sendrecv') {
           const oldDirection = transceiver.direction;
           transceiver.direction = 'sendrecv';
           console.log(`[WebRTCContext] Updated transceiver to sendrecv (was ${oldDirection})`);
