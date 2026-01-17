@@ -240,6 +240,12 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         if (transceiversByKind[track.kind]) {
           // Reuse existing transceiver for this kind
           console.log(`[WebRTCContext] Reusing existing transceiver for ${track.kind}`);
+          // Ensure it's in sendrecv mode
+          const existing = transceiversByKind[track.kind];
+          if (existing.direction !== 'sendrecv') {
+            existing.direction = 'sendrecv';
+            console.log(`[WebRTCContext] Activated existing ${track.kind} transceiver to sendrecv`);
+          }
         } else {
           // No transceiver for this kind yet, create one
           console.log(`[WebRTCContext] Creating new transceiver for ${track.kind} (first time)`);
@@ -249,6 +255,9 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
               ? [{ maxBitrate: 2500000 }] 
               : undefined
           });
+          // CRITICAL: Force direction immediately after creation
+          newTransceiver.direction = 'sendrecv';
+          console.log(`[WebRTCContext] Created and activated ${track.kind} transceiver to sendrecv`);
           transceiversByKind[track.kind] = newTransceiver;
         }
       }
@@ -264,11 +273,9 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           console.log(`[WebRTCContext] Replacing ${track.kind} track on transceiver`);
           await transceiver.sender.replaceTrack(track);
           
-          // Ensure direction is set to sendrecv to enable transmission
-          if (transceiver.direction !== 'sendrecv') {
-            transceiver.direction = 'sendrecv';
-            console.log(`[WebRTCContext] Set transceiver direction to sendrecv for ${track.kind}`);
-          }
+          // CRITICAL: Reinforce direction after replaceTrack for newly-created transceivers
+          transceiver.direction = 'sendrecv';
+          console.log(`[WebRTCContext] Reinforced ${track.kind} transceiver direction to sendrecv after replaceTrack`);
           
           if (track.kind === 'video') {
             const settings = track.getSettings();
