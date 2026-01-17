@@ -615,15 +615,17 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             console.log('Guardian PC transceivers at attach:', pc.getTransceivers ? pc.getTransceivers() : []);
           } catch {}
 
-          // If the guardian has no local camera active, proactively add a recvonly transceiver
+          // If the guardian has no local camera active, proactively add a sendrecv transceiver
           try {
             if (!localCameraActive && typeof pc.addTransceiver === 'function' && !hasAddedRecvTransceiverRef.current) {
               try {
-                // Add video and audio recvonly transceivers so dependent can send media
+                // Add video and audio sendrecv transceivers so dependent can send media
+                // Use sendrecv instead of recvonly so initial offer has real ports for audio/video
+                // This prevents the audio m-line from being disabled in the initial negotiation
                 // Note: data channels are created automatically by simple-peer, not via addTransceiver
-                pc.addTransceiver('video', { direction: 'recvonly' });
-                pc.addTransceiver('audio', { direction: 'recvonly' });
-                console.log('Guardian: proactively added recvonly video and audio transceivers at attach');
+                pc.addTransceiver('video', { direction: 'sendrecv' });
+                pc.addTransceiver('audio', { direction: 'sendrecv' });
+                console.log('Guardian: proactively added sendrecv video and audio transceivers at attach');
                 hasAddedRecvTransceiverRef.current = true;
                 try { console.log('Guardian PC transceivers after proactive add:', pc.getTransceivers ? pc.getTransceivers() : []); } catch {}
               } catch (e) {
