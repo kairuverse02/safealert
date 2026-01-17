@@ -224,167 +224,66 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           }
         }
         
-        // CRITICAL FIX: Use existing transceivers instead of addTrack to avoid creating new DTLS transports
-        // The guardian pre-created recvonly transceivers, so we should reuse them
-        const existingTransceivers = pc.getTransceivers();
-        console.log('[WebRTCContext] Found', existingTransceivers.length, 'existing transceivers for track reuse');
-        
+        // FIX: Switch to addTrack() API instead of replaceTrack()
+        // addTrack() bypasses transceiver state issues and may generate cleaner SDP with real ports
         const tracksToAdd = stream.getTracks();
-        console.log(`[WebRTCContext] Stream has ${tracksToAdd.length} tracks to add:`, tracksToAdd.map(t => `${t.kind}(${t.id})`).join(', '));
+        console.log(`[WebRTCContext] Using addTrack() API - Stream has ${tracksToAdd.length} tracks:`, tracksToAdd.map(t => `${t.kind}(${t.id})`).join(', '));
         
-        // Debug: Log existing transceiver state BEFORE processing
-        console.log('[WebRTCContext] Existing transceivers BEFORE track processing:');
+        // Stop/clean all existing transceivers to avoid duplication
+        const existingTransceivers = pc.getTransceivers();
+        console.log('[WebRTCContext] Stopping existing transceivers before addTrack()...');
         existingTransceivers.forEach((t, idx) => {
-          console.log(`  Transceiver ${idx}: direction=${t.direction}, receiver.track=${!!t.receiver.track} (kind=${t.receiver.track?.kind}), sender.track=${!!t.sender.track}`);
-        });
-        
-        // CRITICAL: Use Promise.all to wait for ALL track replacements to complete
-        // This ensures the transceivers are fully updated before creating the offer
-        const trackReplacementPromises = tracksToAdd.map(async (track) => {
-          try {
-            console.log(`[WebRTCContext] Processing ${track.kind} track (id=${track.id}, enabled=${track.enabled}, readyState=${track.readyState})`);
-            
-            // Try to find a transceiver of the same kind that can be reused
-            const matchingTransceiver = existingTransceivers.find(t => {
-              const match = t.receiver.track?.kind === track.kind && !t.sender.track;
-              console.log(`  Checking transceiver: receiver.kind=${t.receiver.track?.kind}, has_sender=${!!t.sender.track}, matches=${match}`);
-              return match;
-            });
-            
-            if (matchingTransceiver) {
-              console.log(`[WebRTCContext] Found matching ${track.kind} transceiver (mid=${matchingTransceiver.mid}, direction=${matchingTransceiver.direction})`);
-              
-              // CRITICAL: Change transceiver direction from recvonly to sendrecv BEFORE replacing track
-              // This activates the sender side of the transceiver
-              console.log(`[WebRTCContext] Changing ${track.kind} transceiver direction from ${matchingTransceiver.direction} to sendrecv`);
-              matchingTransceiver.direction = 'sendrecv';
-              console.log(`[WebRTCContext] Direction changed - verifying: direction=${matchingTransceiver.direction}`);
-              
-              // CRITICAL: WAIT for track replacement to complete before creating offer
-              // This ensures the transceiver state is fully updated
-              console.log(`[WebRTCContext] Reusing existing ${track.kind} transceiver instead of creating new one`);
-              const result = await matchingTransceiver.sender.replaceTrack(track);
-              console.log(`[WebRTCContext] Replaced ${track.kind} track (id=${track.id}) on transceiver - replaceTrack returned:`, result);
-              console.log(`[WebRTCContext] After replaceTrack: sender.track=${!!matchingTransceiver.sender.track} (id=${matchingTransceiver.sender.track?.id}), direction=${matchingTransceiver.direction}`);
-            } else {
-              // Fall back to addTrack if no matching transceiver
-              console.log(`[WebRTCContext] No matching transceiver found for ${track.kind}, creating new one`);
-              pc.addTrack(track, stream);
-            }
-            
-            console.log(`[WebRTCContext] Added ${track.kind} track - enabled: ${track.enabled}, readyState: ${track.readyState}, muted: ${track.muted}`);
-            
-            // Log track settings for video tracks
-            if (track.kind === 'video') {
-              const settings = track.getSettings();
-              console.log(`[WebRTCContext] Video track settings: ${settings.width}x${settings.height} @ ${settings.frameRate}fps, facing: ${settings.facingMode || 'default'}`);
-              
-              // Check if track is actually producing frames
-              setTimeout(() => {
-                console.log(`[WebRTCContext] Video track status after 1s: enabled=${track.enabled}, readyState=${track.readyState}, muted=${track.muted}`);
-
-              }, 1000);
-              
-              // Check WebRTC send stats every 3s
-              const statsInterval = setInterval(async () => {
-                if (track.readyState !== 'live') {
-                  clearInterval(statsInterval);
-                  return;
-                }
-                try {
-                  const stats = await pc.getStats(track);
-                  stats.forEach((report) => {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const r = report as any;
-                    if (r.type === 'outbound-rtp' && r.kind === 'video') {
-                      console.log(`[WebRTCContext] Video send stats: ${r.framesSent || 0} frames sent, ${r.bytesSent || 0} bytes, ${r.framesPerSecond || 0} fps`);
-                    }
-                  });
-                } catch (e) {
-                  console.warn('[WebRTCContext] Failed to get stats:', e);
-                }
-              }, 3000);
-            }
-          } catch (e) {
-            console.warn(`[WebRTCContext] Failed to add ${track.kind} track:`, e);
+          const kind = t.sender.track?.kind || t.receiver.track?.kind;
+          console.log(`  Stopping transceiver ${idx} (${kind}): mid=${t.mid}, direction=${t.direction}`);
+          if (t.direction !== 'inactive') {
+            t.direction = 'inactive';
           }
         });
         
-        // Wait for all track replacements to complete
-        await Promise.all(trackReplacementPromises);
-        
-        console.log('[WebRTCContext] All track replacements completed, verifying transceiver state...');
-        existingTransceivers.forEach((t, i) => {
-          const kind = t.sender.track?.kind || t.receiver.track?.kind;
-          console.log(`  Transceiver ${i} (${kind}): direction=${t.direction}, sender.track=${!!t.sender.track} (track.id=${t.sender.track?.id}), receiver.track=${!!t.receiver.track}`);
+        // Now add tracks using addTrack() - this should generate clean m-lines
+        console.log('[WebRTCContext] Adding tracks via addTrack()...');
+        tracksToAdd.forEach((track) => {
+          console.log(`[WebRTCContext] addTrack() - ${track.kind} (id=${track.id}, enabled=${track.enabled})`);
+          pc.addTrack(track, stream);
+          if (track.kind === 'video') {
+            const settings = track.getSettings();
+            console.log(`[WebRTCContext] Video track settings: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
+            
+            // Check WebRTC send stats every 3s
+            const statsInterval = setInterval(async () => {
+              if (track.readyState !== 'live') {
+                clearInterval(statsInterval);
+                return;
+              }
+              try {
+                const stats = await pc.getStats(track);
+                stats.forEach((report) => {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const r = report as any;
+                  if (r.type === 'outbound-rtp' && r.kind === 'video') {
+                    console.log(`[WebRTCContext] Video send stats: ${r.framesSent || 0} frames sent, ${r.bytesSent || 0} bytes, ${r.framesPerSecond || 0} fps`);
+                  }
+                });
+              } catch (e) {
+                console.warn('[WebRTCContext] Failed to get stats:', e);
+              }
+            }, 3000);
+          }
         });
         
-        // CRITICAL: Verify transceiver state BEFORE creating offer
-        // The browser may not have fully applied the direction change yet
+        // Wait a bit for addTrack() to update transceiver state
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         const transceivers = pc.getTransceivers();
-        console.log('[WebRTCContext] Transceiver states BEFORE offer creation:');
+        console.log('[WebRTCContext] Transceiver state after addTrack():');
         transceivers.forEach((t, i) => {
-          console.log(`  Transceiver ${i}: direction=${t.direction}, mid=${t.mid}, sender.track=${!!t.sender.track}, receiver.track=${!!t.receiver.track}`);
-        });
-        
-        // CRITICAL: Verify only MEDIA transceivers (audio/video) are in sendrecv
-        // Datachannel transceivers don't need sender.track, so exclude them from the check
-        const mediaTransceivers = transceivers.filter(t => {
           const kind = t.sender.track?.kind || t.receiver.track?.kind;
-          return kind === 'audio' || kind === 'video';
-        });
-        
-        console.log(`[WebRTCContext] Checking ${mediaTransceivers.length} media transceivers for sendrecv state...`);
-        mediaTransceivers.forEach((t, idx) => {
-          console.log(`  Media transceiver ${idx}: direction=${t.direction}, sender.track=${!!t.sender.track}, sender.kind=${t.sender.track?.kind}, receiver.kind=${t.receiver.track?.kind}`);
-        });
-        
-        let allSendrecv = mediaTransceivers.every(t => t.direction === 'sendrecv' && t.sender.track);
-        let attempts = 0;
-        while (!allSendrecv && attempts < 10) {  // Increased from 5 to 10 attempts (200ms total)
-          console.log(`[WebRTCContext] Waiting for transceiver state propagation (attempt ${attempts + 1}/10)...`);
-          await new Promise(resolve => setTimeout(resolve, 20));
-          
-          // Check again - only media transceivers
-          const updatedTransceivers = pc.getTransceivers();
-          const updatedMediaTransceivers = updatedTransceivers.filter(t => {
-            const kind = t.sender.track?.kind || t.receiver.track?.kind;
-            return kind === 'audio' || kind === 'video';
-          });
-          allSendrecv = updatedMediaTransceivers.every(t => t.direction === 'sendrecv' && t.sender.track);
-          if (allSendrecv) {
-            console.log('[WebRTCContext] All transceivers ready for offer creation');
-            break;
-          }
-          attempts++;
-          
-          // Log state on each attempt for debugging
-          if (attempts % 3 === 0 || attempts === 9) {  // Log every 60ms or on final attempt
-            updatedMediaTransceivers.forEach((t, idx) => {
-              console.log(`  Attempt ${attempts}: transceiver ${idx}: direction=${t.direction}, sender.track=${!!t.sender.track}`);
-            });
-          }
-        }
-        
-        if (!allSendrecv) {
-          console.warn('[WebRTCContext] ⚠️ Media transceivers FAILED readiness check after 200ms, proceeding anyway');
-          mediaTransceivers.forEach((t, idx) => {
-            console.warn(`  Transceiver ${idx}: direction=${t.direction} (expected sendrecv), sender.track=${!!t.sender.track} (expected true), kind=${t.sender.track?.kind || 'none'}`);
-          });
-        }
-        
-        // REVERT: Don't add new transceivers - they create duplicate m-lines in SDP
-        // Use existing transceivers which are already sendrecv with tracks
-        console.log('[WebRTCContext] Using existing sendrecv transceivers for renegotiation offer...');
-        console.log('[WebRTCContext] Transceiver state ready for offer:');
-        mediaTransceivers.forEach((t, idx) => {
-          const kind = t.sender.track?.kind || t.receiver.track?.kind;
-          console.log(`  Transceiver ${idx} (${kind}): direction=${t.direction}, mid=${t.mid}, sender.track=${!!t.sender.track}`);
+          console.log(`  Transceiver ${i} (${kind}): direction=${t.direction}, mid=${t.mid}, sender.track=${!!t.sender.track}`);
         });
         
         // Create and send renegotiation offer
         // **FIX: Loop until audio m-line has real port (not 9)**
-        console.log('[WebRTCContext] Creating renegotiation offer...');
+        console.log('[WebRTCContext] Creating renegotiation offer with addTrack()...');
         let offer = await pc.createOffer();
         let attemptCount = 0;
         const maxAttempts = 10;
@@ -397,6 +296,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           await new Promise(resolve => setTimeout(resolve, 50));
           offer = await pc.createOffer();
         }
+        
         
         if (attemptCount > 0 && attemptCount < maxAttempts) {
           console.log(`[WebRTCContext] ✅ Audio m-line regenerated after ${attemptCount} attempt(s)`);
