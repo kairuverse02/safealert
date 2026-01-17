@@ -55,6 +55,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
 
   const peerRef = useRef<Peer.Instance | null>(null);
   const nativePcRef = useRef<RTCPeerConnection | null>(null); // Keep reference to native PC
+  const roomIdRef = useRef<string | null>(null); // Keep reference to room ID across redirects
   const channelRef = useRef<RealtimeChannel | null>(null);
   const supabase = createClient();
   const pollRef = useRef<number | null>(null);
@@ -116,6 +117,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
     setIsPairing(false);
     setConnectionState('closed');
     setCurrentRoomId(null);
+    roomIdRef.current = null;
     setIsMonitoringActive(false);
     
     console.log('[WebRTCContext] Connection destroyed');
@@ -151,6 +153,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
   // Start monitoring
   const startMonitoring = useCallback(async () => {
     console.log('[WebRTCContext] Starting monitoring...');
+    console.log('[WebRTCContext] Current room ID:', currentRoomId);
     
     if (!peerRef.current) {
       console.error('[WebRTCContext] Cannot start monitoring - no peer connection');
@@ -231,9 +234,11 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         await pc.setLocalDescription(offer);
         
         // Send offer to guardian via API
-        if (currentRoomId) {
+        const roomId = roomIdRef.current || currentRoomId;
+        console.log('[WebRTCContext] Using room ID for renegotiation:', roomId);
+        if (roomId) {
           try {
-            const resp = await fetch(`/api/signaling/${currentRoomId}`, {
+            const resp = await fetch(`/api/signaling/${roomId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ offer_signal: offer }),
@@ -253,7 +258,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             
             answerPollRef.current = window.setInterval(async () => {
               try {
-                const answerResp = await fetch(`/api/signaling/${currentRoomId}`);
+                const answerResp = await fetch(`/api/signaling/${roomId}`);
                 const answerData = await answerResp.json().catch(() => null);
                 const answer = answerData?.data?.answer_signal;
                 
@@ -340,6 +345,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
     console.log('[WebRTCContext] Pairing with room:', roomId);
     setIsPairing(true);
     setCurrentRoomId(roomId);
+    roomIdRef.current = roomId;
     setLocalStream(stream);
     
     try {
