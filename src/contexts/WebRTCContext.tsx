@@ -224,10 +224,34 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           }
         }
         
-        // Add tracks
-        stream.getTracks().forEach(track => {
+        // CRITICAL FIX: Use existing transceivers instead of addTrack to avoid creating new DTLS transports
+        // The guardian pre-created recvonly transceivers, so we should reuse them
+        const existingTransceivers = pc.getTransceivers();
+        console.log('[WebRTCContext] Found', existingTransceivers.length, 'existing transceivers for track reuse');
+        
+        const tracksToAdd = stream.getTracks();
+        tracksToAdd.forEach((track) => {
           try {
-            pc.addTrack(track, stream);
+            // Try to find a transceiver of the same kind that can be reused
+            const matchingTransceiver = existingTransceivers.find(t => 
+              t.receiver.track?.kind === track.kind && 
+              !t.sender.track  // Only reuse if sender hasn't been set yet
+            );
+            
+            if (matchingTransceiver) {
+              // Reuse existing transceiver by setting the track on the sender
+              console.log(`[WebRTCContext] Reusing existing ${track.kind} transceiver instead of creating new one`);
+              matchingTransceiver.sender.replaceTrack(track).then(() => {
+                console.log(`[WebRTCContext] Replaced ${track.kind} track on existing transceiver`);
+              }).catch((e) => {
+                console.error(`[WebRTCContext] Failed to replace ${track.kind} track:`, e);
+              });
+            } else {
+              // Fall back to addTrack if no matching transceiver
+              console.log(`[WebRTCContext] No matching transceiver found for ${track.kind}, creating new one`);
+              pc.addTrack(track, stream);
+            }
+            
             console.log(`[WebRTCContext] Added ${track.kind} track - enabled: ${track.enabled}, readyState: ${track.readyState}, muted: ${track.muted}`);
             
             // Log track settings for video tracks
