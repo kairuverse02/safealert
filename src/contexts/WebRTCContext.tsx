@@ -336,81 +336,19 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       }
       
       if (offer.sdp) {
-        console.log('[WebRTCContext] Renegotiation offer m-lines BEFORE cleanup:', offer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
+        console.log('[WebRTCContext] Renegotiation offer m-lines:', offer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
       }
       
-      // CRITICAL FIX: Strip disabled m-lines (port 9) AND their attributes from offer
-      // Also rebuild BUNDLE group to avoid "MID matching no m= section" errors
-      let cleanedSdp = offer.sdp || '';
-      const sdpLines = cleanedSdp.split('\r\n');
-      const filteredLines: string[] = [];
-      let skipNextAttributes = false;
-      const keptMlines: number[] = []; // Track which m-line indices we're keeping
-      let mlineIndex = 0;
+      // CRITICAL: DO NOT strip disabled m-lines from the offer!
+      // WebRTC requires m-line structure to remain constant across renegotiations.
+      // Keep ALL m-lines (including disabled ones with port 9) to maintain consistency.
+      console.log('[WebRTCContext] Sending renegotiation offer with ALL m-lines intact (including disabled ones)');
       
-      for (let i = 0; i < sdpLines.length; i++) {
-        const line = sdpLines[i];
-        
-        if (line.startsWith('m=')) {
-          // Check if this m-line is disabled (port 9)
-          // Parse the port number: m=<media> <port> ...
-          const parts = line.split(' ');
-          const port = parts[1];
-          const isDisabled = port === '9';
-          
-          if (isDisabled) {
-            console.log('[WebRTCContext] Stripping disabled m-line and its attributes:', line);
-            skipNextAttributes = true;
-            mlineIndex++;
-            continue;
-          } else {
-            // Enabled m-line, keep track of its index
-            skipNextAttributes = false;
-            keptMlines.push(mlineIndex);
-            filteredLines.push(line);
-            mlineIndex++;
-          }
-        } else if (skipNextAttributes && (line.startsWith('a=') || line.startsWith('c=') || line.startsWith('b='))) {
-          // Skip attributes belonging to the disabled m-line
-          console.log('[WebRTCContext] Skipping attribute of disabled m-line:', line.substring(0, 50));
-          continue;
-        } else if (line.startsWith('a=group:BUNDLE ')) {
-          // Don't add this line yet - we'll rebuild it with only kept m-line indices
-          console.log('[WebRTCContext] Will rebuild BUNDLE group for kept m-lines:', keptMlines);
-          continue;
-        } else {
-          // Keep all other lines (session-level attributes, etc.)
-          filteredLines.push(line);
-        }
-      }
-      
-      // Rebuild BUNDLE group with only the kept m-line indices
-      if (keptMlines.length > 0) {
-        const bundleLine = 'a=group:BUNDLE ' + keptMlines.join(' ');
-        // Insert BUNDLE line after session-level lines but before first m-line
-        let insertIndex = 0;
-        for (let i = 0; i < filteredLines.length; i++) {
-          if (filteredLines[i].startsWith('m=')) {
-            insertIndex = i;
-            break;
-          }
-          insertIndex = i + 1;
-        }
-        filteredLines.splice(insertIndex, 0, bundleLine);
-        console.log('[WebRTCContext] Rebuilt BUNDLE line:', bundleLine);
-      }
-      
-      cleanedSdp = filteredLines.join('\r\n');
-      const cleanedOffer = { ...offer, sdp: cleanedSdp };
-      
-      if (cleanedOffer.sdp) {
-        console.log('[WebRTCContext] Renegotiation offer m-lines AFTER cleanup:', cleanedOffer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
-      }
-      
-      await pc.setLocalDescription(offer); // Use original offer for local description
+      await pc.setLocalDescription(offer);
       console.log('[WebRTCContext] Renegotiation offer sent, signalingState:', pc.signalingState);
       
-      // Send CLEANED offer to guardian via API
+      // Send renegotiation offer to guardian via API
+      // CRITICAL: Send the FULL offer without stripping m-lines to maintain m-line consistency
       const roomId = roomIdRef.current || currentRoomId;
       console.log('[WebRTCContext] Using room ID for renegotiation:', roomId);
       if (roomId) {
@@ -418,7 +356,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           const resp = await fetch(`/api/signaling/${roomId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ offer_signal: cleanedOffer }),
+            body: JSON.stringify({ offer_signal: offer }),
           });
           console.log('[WebRTCContext] Sent renegotiation offer:', resp.status);
           
