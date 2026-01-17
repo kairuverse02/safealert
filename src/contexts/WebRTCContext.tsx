@@ -373,54 +373,13 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           });
         }
         
-        // NEW APPROACH: Don't toggle direction - REPLACE transceivers entirely
-        // Remove old recvonly transceivers and add new sendrecv ones with proper SDP generation
-        console.log('[WebRTCContext] NEW APPROACH: Replacing recvonly transceivers with fresh sendrecv ones...');
-        
-        const allTransceivers = pc.getTransceivers();
-        console.log(`[WebRTCContext] Total transceivers: ${allTransceivers.length}`);
-        
-        // Find and stop the old recvonly transceivers for each media kind
-        const transceiversByKind: { [key: string]: RTCRtpTransceiver } = {};
-        allTransceivers.forEach(t => {
-          const kind = t.receiver.track?.kind;
-          if (kind === 'audio' || kind === 'video') {
-            if (!transceiversByKind[kind]) {
-              transceiversByKind[kind] = t;
-              console.log(`[WebRTCContext] Found existing ${kind} transceiver (direction=${t.direction}, mid=${t.mid})`);
-            }
-          }
-        });
-        
-        // Stop the old transceivers by setting direction to inactive, then add new ones
-        Object.entries(transceiversByKind).forEach(([kind, transceiver]) => {
-          transceiver.direction = 'inactive';
-          transceiver.stop();
-          console.log(`[WebRTCContext] Stopped old ${kind} transceiver`);
-        });
-        
-        // Small delay to let browser process the stop
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // Now add fresh sendrecv transceivers for video and audio
-        console.log('[WebRTCContext] Adding fresh sendrecv transceivers for media...');
-        stream.getTracks().forEach(track => {
-          const kind = track.kind;
-          console.log(`[WebRTCContext] Adding ${kind} track to fresh transceiver...`);
-          pc.addTransceiver(track, { direction: 'sendrecv', sendEncodings: kind === 'video' ? [{ maxBitrate: 500000 }] : undefined });
-        });
-        
-        // Wait for new transceivers to settle
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // Verify new transceiver state
-        console.log('[WebRTCContext] Verifying fresh transceiver state:');
-        const freshTransceivers = pc.getTransceivers();
-        freshTransceivers.forEach((t, idx) => {
+        // REVERT: Don't add new transceivers - they create duplicate m-lines in SDP
+        // Use existing transceivers which are already sendrecv with tracks
+        console.log('[WebRTCContext] Using existing sendrecv transceivers for renegotiation offer...');
+        console.log('[WebRTCContext] Transceiver state ready for offer:');
+        mediaTransceivers.forEach((t, idx) => {
           const kind = t.sender.track?.kind || t.receiver.track?.kind;
-          if (kind === 'audio' || kind === 'video') {
-            console.log(`  Transceiver ${idx} (${kind}): direction=${t.direction}, sender.track=${!!t.sender.track}, mid=${t.mid}`);
-          }
+          console.log(`  Transceiver ${idx} (${kind}): direction=${t.direction}, mid=${t.mid}, sender.track=${!!t.sender.track}`);
         });
         
         // Create and send renegotiation offer
