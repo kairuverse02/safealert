@@ -236,7 +236,21 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   // Redirect to dashboard when monitoring starts
   useEffect(() => {
     if (isPaired && isMonitoringActive && connectionState === 'connected') {
-      console.log('[PatientScanner] Monitoring active and connected, redirecting to dashboard');
+      console.log('[PatientScanner] Monitoring active and connected, cleaning up preview stream');
+      
+      // Stop preview stream to avoid camera conflicts
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => {
+          track.stop();
+          console.log('[PatientScanner] Stopped preview track:', track.kind);
+        });
+        localStreamRef.current = null;
+        if (myVideoRef.current) {
+          myVideoRef.current.srcObject = null;
+        }
+      }
+      
+      console.log('[PatientScanner] Redirecting to dashboard');
       router.push('/client/dashboard');
     }
   }, [isPaired, isMonitoringActive, connectionState, router]);

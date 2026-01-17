@@ -233,12 +233,12 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             // Log track settings for video tracks
             if (track.kind === 'video') {
               const settings = track.getSettings();
-              console.log(`[WebRTCContext] Video track settings:`, {
-                width: settings.width,
-                height: settings.height,
-                frameRate: settings.frameRate,
-                facingMode: settings.facingMode
-              });
+              console.log(`[WebRTCContext] Video track settings: ${settings.width}x${settings.height} @ ${settings.frameRate}fps, facing: ${settings.facingMode || 'default'}`);
+              
+              // Check if track is actually producing frames
+              setTimeout(() => {
+                console.log(`[WebRTCContext] Video track status after 1s: enabled=${track.enabled}, readyState=${track.readyState}, muted=${track.muted}`);
+              }, 1000);
             }
           } catch (e) {
             console.warn(`[WebRTCContext] Failed to add ${track.kind} track:`, e);

@@ -13,15 +13,26 @@ export default function CameraMenu() {
 
   // Sync with WebRTC localStream
   useEffect(() => {
+    console.log('[CameraMenu] localStream changed:', localStream ? `${localStream.getVideoTracks().length}v ${localStream.getAudioTracks().length}a` : 'null');
+    
     if (localStream && videoRef.current) {
+      console.log('[CameraMenu] Setting video srcObject and starting playback');
       videoRef.current.srcObject = localStream;
-      videoRef.current.play().catch(() => {});
+      videoRef.current.play().catch((e) => console.warn('[CameraMenu] Video play failed:', e));
       const hasVideo = localStream.getVideoTracks().length > 0;
       const hasAudio = localStream.getAudioTracks().length > 0;
+      console.log('[CameraMenu] Setting UI state: camOn=', hasVideo, 'micOn=', hasAudio);
       setCamOn(hasVideo);
       setMicOn(hasAudio);
       streamRef.current = localStream;
+      
+      // Log track details
+      localStream.getVideoTracks().forEach((t, i) => {
+        const settings = t.getSettings();
+        console.log(`[CameraMenu] Video track ${i}: ${settings.width}x${settings.height}, enabled=${t.enabled}, readyState=${t.readyState}`);
+      });
     } else if (!localStream) {
+      console.log('[CameraMenu] localStream is null, clearing video');
       if (videoRef.current) videoRef.current.srcObject = null;
       setCamOn(false);
       setMicOn(false);
