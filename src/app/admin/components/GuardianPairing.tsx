@@ -556,55 +556,44 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                           if (newOffer && newOffer.type === 'offer' && peerRef.current) {
                             const offerSdp = newOffer.sdp;
                             if (offerSdp && offerSdp !== lastProcessedOfferSdpRef.current) {
-                              console.log('Guardian: received NEW renegotiation offer, ensuring transceivers are sendrecv BEFORE processing');
+                              console.log('Guardian: received NEW renegotiation offer, inspecting m-lines...');
                               
-                              // CRITICAL: Before simple-peer processes this offer and creates an answer,
-                              // we MUST ensure all transceivers are in sendrecv state
-                              try {
-                                const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                                if (pc) {
-                                  const transceivers = pc.getTransceivers();
-                                  console.log('Guardian: Ensuring transceivers sendrecv before renegotiation answer. Count:', transceivers.length);
-                                  for (const transceiver of transceivers) {
-                                    if ((transceiver.receiver?.track?.kind === 'video' || transceiver.receiver?.track?.kind === 'audio' ||
-                                         transceiver.sender?.track?.kind === 'video' || transceiver.sender?.track?.kind === 'audio') &&
-                                        transceiver.direction !== 'sendrecv') {
-                                      const oldDirection = transceiver.direction;
-                                      transceiver.direction = 'sendrecv';
-                                      console.log(`Guardian: Updated transceiver direction to sendrecv (was ${oldDirection})`);
-                                    }
-                                  }
-                                }
-                              } catch (err) {
-                                console.warn('Guardian: failed to update transceivers before renegotiation', err);
-                              }
+                              const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
                               
-                              // CRITICAL: Also remove dummy tracks here before renegotiation answer is created
-                              try {
-                                const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                                if (pc) {
-                                  const senders = pc.getSenders();
-                                  for (const sender of senders) {
-                                    if (sender.track && (sender.track.kind === 'audio' || sender.track.kind === 'video')) {
-                                      // Identify dummy tracks by label or disabled state
-                                      const isDummy = !sender.track.enabled || sender.track.label.includes('stream');
-                                      if (isDummy) {
-                                        console.log(`Guardian: Removing dummy ${sender.track.kind} track before renegotiation answer`);
-                                        try {
-                                          pc.removeTrack(sender);
-                                        } catch (e) {
-                                          console.warn(`Guardian: Exception removing dummy ${sender.track.kind} track`, e);
-                                        }
-                                      }
-                                    }
-                                  }
+                              // --- FIX START: Add missing transceivers based on Offer SDP ---
+                              if (pc) {
+                                const hasVideoOffer = /m=video/.test(offerSdp);
+                                const hasAudioOffer = /m=audio/.test(offerSdp);
+                                const transceivers = pc.getTransceivers();
+                                
+                                const hasVideoTransceiver = transceivers.some(t => t.receiver.track?.kind === 'video' || t.sender.track?.kind === 'video');
+                                const hasAudioTransceiver = transceivers.some(t => t.receiver.track?.kind === 'audio' || t.sender.track?.kind === 'audio');
+
+                                // If offer wants video but we have no slot, add one
+                                if (hasVideoOffer && !hasVideoTransceiver) {
+                                    console.log('[Guardian] Offer has video but no transceiver found. Adding recvonly video.');
+                                    pc.addTransceiver('video', { direction: 'recvonly' });
                                 }
-                              } catch (err) {
-                                console.warn('Guardian: Failed to remove dummy tracks before renegotiation answer', err);
+
+                                // If offer wants audio but we have no slot, add one (This is the missing piece!)
+                                if (hasAudioOffer && !hasAudioTransceiver) {
+                                    console.log('[Guardian] Offer has audio but no transceiver found. Adding recvonly audio.');
+                                    pc.addTransceiver('audio', { direction: 'recvonly' });
+                                }
+
+                                // Ensure all existing transceivers are active
+                                console.log('[Guardian] Ensuring transceivers sendrecv/recvonly before answer.');
+                                pc.getTransceivers().forEach(t => {
+                                    if (t.direction !== 'sendrecv' && t.direction !== 'recvonly') {
+                                        t.direction = 'recvonly'; // Default to receiving if we aren't sending
+                                    }
+                                });
                               }
+                              // --- FIX END ---
                               
                               lastProcessedOfferSdpRef.current = offerSdp;
                               
+                              // Now signal simple-peer, which will create the Answer with the correct m-lines
                               peerRef.current.signal(newOffer);
                             }
                           }
