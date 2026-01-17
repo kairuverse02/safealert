@@ -314,11 +314,14 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         });
         
         console.log(`[WebRTCContext] Checking ${mediaTransceivers.length} media transceivers for sendrecv state...`);
+        mediaTransceivers.forEach((t, idx) => {
+          console.log(`  Media transceiver ${idx}: direction=${t.direction}, sender.track=${!!t.sender.track}, sender.kind=${t.sender.track?.kind}, receiver.kind=${t.receiver.track?.kind}`);
+        });
         
         let allSendrecv = mediaTransceivers.every(t => t.direction === 'sendrecv' && t.sender.track);
         let attempts = 0;
-        while (!allSendrecv && attempts < 5) {
-          console.log(`[WebRTCContext] Waiting for transceiver state propagation (attempt ${attempts + 1}/5)...`);
+        while (!allSendrecv && attempts < 10) {  // Increased from 5 to 10 attempts (200ms total)
+          console.log(`[WebRTCContext] Waiting for transceiver state propagation (attempt ${attempts + 1}/10)...`);
           await new Promise(resolve => setTimeout(resolve, 20));
           
           // Check again - only media transceivers
@@ -333,14 +336,19 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             break;
           }
           attempts++;
+          
+          // Log state on each attempt for debugging
+          if (attempts % 3 === 0 || attempts === 9) {  // Log every 60ms or on final attempt
+            updatedMediaTransceivers.forEach((t, idx) => {
+              console.log(`  Attempt ${attempts}: transceiver ${idx}: direction=${t.direction}, sender.track=${!!t.sender.track}`);
+            });
+          }
         }
         
         if (!allSendrecv) {
-          console.warn('[WebRTCContext] Media transceivers may not be fully ready, proceeding anyway');
-          mediaTransceivers.forEach((t) => {
-            if (t.direction !== 'sendrecv' || !t.sender.track) {
-              console.warn(`  Media transceiver: direction=${t.direction}, kind=${t.sender.track?.kind || 'unknown'}, has sender=${!!t.sender.track}`);
-            }
+          console.warn('[WebRTCContext] ⚠️ Media transceivers FAILED readiness check after 200ms, proceeding anyway');
+          mediaTransceivers.forEach((t, idx) => {
+            console.warn(`  Transceiver ${idx}: direction=${t.direction} (expected sendrecv), sender.track=${!!t.sender.track} (expected true), kind=${t.sender.track?.kind || 'none'}`);
           });
         }
         
