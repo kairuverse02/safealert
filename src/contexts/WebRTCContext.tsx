@@ -277,6 +277,21 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       
       // Create renegotiation offer
       console.log('[WebRTCContext] Creating renegotiation offer...');
+      
+      // CRITICAL: Ensure ALL transceivers are in sendrecv before createOffer
+      // so the offer will have real ports instead of disabled m-lines
+      const allTransceivers = pc.getTransceivers();
+      console.log('[WebRTCContext] Ensuring all transceivers are sendrecv before createOffer. Count:', allTransceivers.length);
+      for (const transceiver of allTransceivers) {
+        if ((transceiver.receiver?.track?.kind === 'video' || transceiver.receiver?.track?.kind === 'audio' ||
+             transceiver.sender?.track?.kind === 'video' || transceiver.sender?.track?.kind === 'audio') &&
+            transceiver.direction !== 'sendrecv') {
+          const oldDirection = transceiver.direction;
+          transceiver.direction = 'sendrecv';
+          console.log(`[WebRTCContext] Updated transceiver to sendrecv (was ${oldDirection})`);
+        }
+      }
+      
       let offer = await pc.createOffer();
       let attemptCount = 0;
       const maxAttempts = 10;
