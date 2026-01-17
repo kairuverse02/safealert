@@ -223,49 +223,46 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       
       // --- START OF FIX ---
       
-      // CRITICAL: Manage transceivers to prevent "Ghost" m-lines
-      // We want exactly 1 active transceiver per track kind (audio/video)
-      const streamTracks = stream.getTracks();
+      // 1. Group existing transceivers by kind (ARRAY, not single object)
       const existingTransceivers = pc.getTransceivers();
-      
-      // 1. Group existing transceivers by kind
       const transceiversByKind: Record<string, RTCRtpTransceiver[]> = {
         video: [],
         audio: []
       };
       
       existingTransceivers.forEach(t => {
-        // Identify kind from sender or receiver
+        if (t.currentDirection === 'stopped') return; // Skip already stopped ones
         const kind = t.sender?.track?.kind || t.receiver?.track?.kind;
         if (kind === 'video' || kind === 'audio') {
           transceiversByKind[kind].push(t);
         }
       });
 
-      // 2. Assign tracks to the FIRST transceiver of each kind and STOP duplicates
+      // 2. Assign tracks to the FIRST transceiver and STOP the others
+      const streamTracks = stream.getTracks();
       for (const track of streamTracks) {
         const kind = track.kind as 'video' | 'audio';
-        const availableTransceivers = transceiversByKind[kind];
+        const available = transceiversByKind[kind];
         
-        if (availableTransceivers && availableTransceivers.length > 0) {
-          // REUSE: Pick the first one
-          const transceiverToUse = availableTransceivers[0];
-          console.log(`[WebRTCContext] Reusing existing ${kind} transceiver (mid=${transceiverToUse.mid})`);
+        if (available && available.length > 0) {
+          // REUSE: Pick the first available transceiver
+          const t = available[0];
+          console.log(`[WebRTCContext] ♻️ Reusing existing ${kind} transceiver (mid=${t.mid})`);
           
-          await transceiverToUse.sender.replaceTrack(track);
-          transceiverToUse.direction = 'sendrecv';
+          await t.sender.replaceTrack(track);
+          t.direction = 'sendrecv';
           
-          // CLEANUP: Stop any *extra* transceivers of this kind to prevent duplicate m-lines
-          for (let i = 1; i < availableTransceivers.length; i++) {
-            const t = availableTransceivers[i];
-            if (t.direction !== 'stopped') {
-              console.log(`[WebRTCContext] Stopping duplicate ${kind} transceiver (mid=${t.mid})`);
-              t.stop(); // This effectively removes it from the active negotiation or rejects the m-line
-            }
+          // CLEANUP: Stop any EXTRA transceivers (The Fix Copilot Missed)
+          for (let i = 1; i < available.length; i++) {
+             const extra = available[i];
+             if (extra.direction !== 'stopped') {
+                console.log(`[WebRTCContext] 🛑 Stopping duplicate ${kind} transceiver (mid=${extra.mid})`);
+                extra.stop(); // <--- THIS is what removes the ghost m-line
+             }
           }
         } else {
-          // CREATE: No existing transceiver found, make a new one
-          console.log(`[WebRTCContext] Creating new transceiver for ${kind}`);
+          // CREATE: No slot found, safe to add a new one
+          console.log(`[WebRTCContext] ➕ Creating new transceiver for ${kind}`);
           const newT = pc.addTransceiver(track, {
             direction: 'sendrecv',
             sendEncodings: kind === 'video' ? [{ maxBitrate: 2500000 }] : undefined
@@ -378,7 +375,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         `Permission denied: ${error?.message || String(err)}`
       );
     }
-  }, [currentRoomId, publishGuardianEvent]);
+  }, [currentRoomId, publishGuardianEvent, localStream]);
 
   // Stop monitoring
   const stopMonitoring = useCallback(() => {
