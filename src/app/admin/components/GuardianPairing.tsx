@@ -153,7 +153,36 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
 
     // Do NOT get guardian camera automatically at room creation to avoid prompting permissions.
     // The guardian can enable their local camera manually after the room is created.
-    const localStream: MediaStream | undefined = undefined;
+    // CRITICAL FIX: Create dummy audio/video tracks so that simple-peer's initial offer
+    // includes REAL m-lines (not port 9). Without this, audio m-line gets disabled in the
+    // initial offer and can't be re-enabled in renegotiation.
+    let dummyStream: MediaStream | undefined;
+    try {
+      const audioCtx = new AudioContext();
+      const dummyAudioTrack = audioCtx.createMediaStreamDestination().stream.getTracks()[0];
+      
+      // Create a silent video track using canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, 1, 1);
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dummyVideoTrack = (canvas as any).captureStream(30).getVideoTracks()[0];
+      
+      dummyStream = new MediaStream();
+      if (dummyAudioTrack) dummyStream.addTrack(dummyAudioTrack);
+      if (dummyVideoTrack) dummyStream.addTrack(dummyVideoTrack);
+      console.log('Guardian: Created dummy media stream for initial offer (audio+video enabled)');
+    } catch (err) {
+      console.warn('Guardian: Failed to create dummy media stream', err);
+      dummyStream = undefined;
+    }
+    
+    const localStream: MediaStream | undefined = dummyStream;
     streamRef.current = null;
     // clear any previous camera error
     setErrorMsg(null);
@@ -615,24 +644,9 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             console.log('Guardian PC transceivers at attach:', pc.getTransceivers ? pc.getTransceivers() : []);
           } catch {}
 
-          // If the guardian has no local camera active, proactively add a sendrecv transceiver
-          try {
-            if (!localCameraActive && typeof pc.addTransceiver === 'function' && !hasAddedRecvTransceiverRef.current) {
-              try {
-                // Add video and audio sendrecv transceivers so dependent can send media
-                // Use sendrecv instead of recvonly so initial offer has real ports for audio/video
-                // This prevents the audio m-line from being disabled in the initial negotiation
-                // Note: data channels are created automatically by simple-peer, not via addTransceiver
-                pc.addTransceiver('video', { direction: 'sendrecv' });
-                pc.addTransceiver('audio', { direction: 'sendrecv' });
-                console.log('Guardian: proactively added sendrecv video and audio transceivers at attach');
-                hasAddedRecvTransceiverRef.current = true;
-                try { console.log('Guardian PC transceivers after proactive add:', pc.getTransceivers ? pc.getTransceivers() : []); } catch {}
-              } catch (e) {
-                console.warn('Guardian: failed to proactively add recv transceivers', e);
-              }
-            }
-          } catch {}
+          // Note: Dummy audio/video tracks were already added via localStream before Peer creation,
+          // so initial offer will have REAL m-lines, not port 9. No need to addTransceiver here.
+
 
           // Fallback: listen for individual track events and build a MediaStream if simple-peer 'stream' doesn't fire
           try {
