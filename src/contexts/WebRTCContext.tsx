@@ -592,21 +592,10 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         nativePcRef.current = nativePc;
         console.log('[WebRTCContext] Stored native PC reference');
         
-        // CRITICAL: Create placeholder transceivers for video and audio NOW
-        // This ensures the m-lines will exist in the answer SDP, preventing m-line mismatch
-        // during renegotiation when we add actual tracks later
-        console.log('[WebRTCContext] Creating placeholder recv-only transceivers for m-line consistency');
-        try {
-          // Add recv-only video transceiver
-          const videoTransceiver = nativePc.addTransceiver('video', { direction: 'recvonly' });
-          console.log('[WebRTCContext] Added recv-only video transceiver, mid:', videoTransceiver.mid);
-          
-          // Add recv-only audio transceiver (though we might not use it initially)
-          const audioTransceiver = nativePc.addTransceiver('audio', { direction: 'recvonly' });
-          console.log('[WebRTCContext] Added recv-only audio transceiver, mid:', audioTransceiver.mid);
-        } catch (e) {
-          console.warn('[WebRTCContext] Failed to add placeholder transceivers:', e);
-        }
+        // DO NOT create placeholder transceivers here!
+        // They cause m-line duplication during renegotiation.
+        // Instead, let startMonitoring() create transceivers on-demand when actual tracks are available.
+        console.log('[WebRTCContext] Skipping placeholder transceivers - will create on-demand during startMonitoring');
         
         // CRITICAL: Prevent simple-peer from closing the native PC when data channel fails
         // Override the peer's destroy method to NOT close the native PC
