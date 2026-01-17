@@ -228,7 +228,18 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         stream.getTracks().forEach(track => {
           try {
             pc.addTrack(track, stream);
-            console.log(`[WebRTCContext] Added ${track.kind} track`);
+            console.log(`[WebRTCContext] Added ${track.kind} track - enabled: ${track.enabled}, readyState: ${track.readyState}, muted: ${track.muted}`);
+            
+            // Log track settings for video tracks
+            if (track.kind === 'video') {
+              const settings = track.getSettings();
+              console.log(`[WebRTCContext] Video track settings:`, {
+                width: settings.width,
+                height: settings.height,
+                frameRate: settings.frameRate,
+                facingMode: settings.facingMode
+              });
+            }
           } catch (e) {
             console.warn(`[WebRTCContext] Failed to add ${track.kind} track:`, e);
           }
