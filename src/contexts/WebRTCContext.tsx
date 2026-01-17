@@ -167,11 +167,16 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
     }
 
     try {
-      // Get media stream with video + audio
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      console.log('[WebRTCContext] Got media stream - audio tracks:', stream.getAudioTracks().length, 'video tracks:', stream.getVideoTracks().length);
+      // Use existing stream from pairing (already has camera + mic permissions)
+      // Or request fresh stream if not available
+      let stream = localStream;
+      if (!stream) {
+        console.log('[WebRTCContext] No stored stream, requesting fresh media stream');
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        setLocalStream(stream);
+      }
       
-      setLocalStream(stream);
+      console.log('[WebRTCContext] Got media stream - audio tracks:', stream.getAudioTracks().length, 'video tracks:', stream.getVideoTracks().length);
       
       const audioCount = stream.getAudioTracks().length;
       if (audioCount === 0) {

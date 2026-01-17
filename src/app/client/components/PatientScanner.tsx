@@ -111,12 +111,12 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
     scannerRef.current?.clear().catch(e => console.error("Scanner clear failed", e));
 
     try {
-      // Get camera stream ONLY for local preview (not for initial connection)
-      // This avoids m-line mismatch with guardian's offer
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      console.log('[PatientScanner] Got camera stream for preview - video:', stream.getVideoTracks().length, 'audio:', stream.getAudioTracks().length);
+      // Get camera AND mic stream for local preview
+      // Request both permissions upfront for better UX instead of asking twice
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      console.log('[PatientScanner] Got camera+mic stream for preview - video:', stream.getVideoTracks().length, 'audio:', stream.getAudioTracks().length);
       
-      // Show local preview
+      // Show local preview (video only, mute audio locally)
       if (myVideoRef.current) {
         myVideoRef.current.srcObject = stream;
       }
