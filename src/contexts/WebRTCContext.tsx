@@ -239,6 +239,26 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
               setTimeout(() => {
                 console.log(`[WebRTCContext] Video track status after 1s: enabled=${track.enabled}, readyState=${track.readyState}, muted=${track.muted}`);
               }, 1000);
+              
+              // Check WebRTC send stats every 3s
+              const statsInterval = setInterval(async () => {
+                if (track.readyState !== 'live') {
+                  clearInterval(statsInterval);
+                  return;
+                }
+                try {
+                  const stats = await pc.getStats(track);
+                  stats.forEach((report) => {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const r = report as any;
+                    if (r.type === 'outbound-rtp' && r.kind === 'video') {
+                      console.log(`[WebRTCContext] Video send stats: ${r.framesSent || 0} frames sent, ${r.bytesSent || 0} bytes, ${r.framesPerSecond || 0} fps`);
+                    }
+                  });
+                } catch (e) {
+                  console.warn('[WebRTCContext] Failed to get stats:', e);
+                }
+              }, 3000);
             }
           } catch (e) {
             console.warn(`[WebRTCContext] Failed to add ${track.kind} track:`, e);

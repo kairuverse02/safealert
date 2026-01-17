@@ -617,6 +617,29 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                 const audioTracks = currentRemoteStream.getAudioTracks().length;
                 console.log('Guardian: remoteStream now has', videoTracks, 'video and', audioTracks, 'audio tracks');
 
+                // Check WebRTC receive stats for video every 3s
+                if (ev.track.kind === 'video' && pc) {
+                  const track = ev.track;
+                  const statsInterval = setInterval(async () => {
+                    if (track.readyState !== 'live') {
+                      clearInterval(statsInterval);
+                      return;
+                    }
+                    try {
+                      const stats = await pc.getStats(track);
+                      stats.forEach((report: RTCStatsReport) => {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const r = report as any;
+                        if (r.type === 'inbound-rtp' && r.kind === 'video') {
+                          console.log(`[Guardian] Video receive stats: ${r.framesReceived || 0} frames received, ${r.bytesReceived || 0} bytes, ${r.framesPerSecond || 0} fps, ${r.framesDecoded || 0} decoded`);
+                        }
+                      });
+                    } catch (e) {
+                      console.warn('[Guardian] Failed to get stats:', e);
+                    }
+                  }, 3000);
+                }
+
                 // Update state with the accumulated stream
                 setRemoteStreamState(currentRemoteStream);
                 setTimeout(() => setShowMonitoring(true), 150);
