@@ -299,17 +299,29 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
                 const answerData = await answerResp.json().catch(() => null);
                 const answer = answerData?.data?.answer_signal;
                 
-                console.log('[WebRTCContext] Answer poll result:', { hasAnswer: !!answer, answerType: answer?.type, hasSdp: !!answer?.sdp });
+                console.log('[WebRTCContext] Answer poll result:', { hasAnswer: !!answer, answerType: answer?.type, hasSdp: !!answer?.sdp, signalingState: pc.signalingState });
                 
                 if (answer && answer.type === 'answer' && answer.sdp && answer.sdp !== lastAppliedAnswerSdp) {
-                  console.log('[WebRTCContext] Received guardian answer, applying');
-                  lastAppliedAnswerSdp = answer.sdp;
-                  await pc.setRemoteDescription(new RTCSessionDescription(answer));
-                  console.log('[WebRTCContext] Renegotiation complete');
-                  // Stop polling after receiving answer
-                  if (answerPollRef.current) {
-                    clearInterval(answerPollRef.current);
-                    answerPollRef.current = null;
+                  // Only apply answer if PC is in "have-local-offer" state (we sent offer, waiting for answer)
+                  if (pc.signalingState === 'have-local-offer') {
+                    console.log('[WebRTCContext] Received guardian answer, applying (signalingState: have-local-offer)');
+                    lastAppliedAnswerSdp = answer.sdp;
+                    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                    console.log('[WebRTCContext] Renegotiation complete');
+                    // Stop polling after receiving answer
+                    if (answerPollRef.current) {
+                      clearInterval(answerPollRef.current);
+                      answerPollRef.current = null;
+                    }
+                  } else if (pc.signalingState === 'stable') {
+                    console.log('[WebRTCContext] Answer received but PC is stable, renegotiation already complete');
+                    // Stop polling - answer was already applied
+                    if (answerPollRef.current) {
+                      clearInterval(answerPollRef.current);
+                      answerPollRef.current = null;
+                    }
+                  } else {
+                    console.log('[WebRTCContext] Answer received but PC in unexpected state:', pc.signalingState);
                   }
                 } else if (answer && answer.sdp === lastAppliedAnswerSdp) {
                   console.log('[WebRTCContext] Answer SDP already applied, skipping');
