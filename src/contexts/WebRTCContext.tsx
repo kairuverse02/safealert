@@ -373,17 +373,23 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           });
         }
         
-        // CRITICAL WORKAROUND: Force SDP regeneration by toggling direction with delay
-        // Browser may cache SDP if direction was just set, so force it through inactive state
-        console.log('[WebRTCContext] Force-triggering SDP regeneration via direction toggle...');
+        // CRITICAL WORKAROUND: Force SDP regeneration by toggling direction with EXTENDED delay
+        // 50ms was insufficient. Trying 500ms to ensure browser fully processes state changes
+        console.log('[WebRTCContext] Force-triggering SDP regeneration via direction toggle with 500ms delays...');
         mediaTransceivers.forEach(t => {
           const oldDir = t.direction;
           t.direction = 'inactive';
           console.log(`  [Inactive] transceiver direction=${oldDir} → inactive (preparing for sendrecv)`);
         });
         
-        // Wait 50ms to let browser process the inactive state change
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // Wait 500ms to ensure browser fully processes the inactive state change
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Verify state actually changed
+        console.log('[WebRTCContext] Verifying inactive state applied:');
+        mediaTransceivers.forEach((t, idx) => {
+          console.log(`  Transceiver ${idx}: direction=${t.direction} (should be inactive)`);
+        });
         
         // Set back to sendrecv to trigger regeneration
         console.log('[WebRTCContext] Setting transceivers back to sendrecv...');
@@ -392,8 +398,14 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           console.log(`  [Reset] transceiver direction=inactive → sendrecv (triggering SDP regeneration)`);
         });
         
-        // Wait another 50ms for sendrecv to propagate before creating offer
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // Wait 500ms for sendrecv to propagate before creating offer - CRITICAL for SDP regeneration
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Verify sendrecv state
+        console.log('[WebRTCContext] Verifying sendrecv state before offer creation:');
+        mediaTransceivers.forEach((t, idx) => {
+          console.log(`  Transceiver ${idx}: direction=${t.direction} (should be sendrecv), sender.track=${!!t.sender.track}`);
+        });
         
         // Create and send renegotiation offer
         console.log('[WebRTCContext] Creating renegotiation offer...');
