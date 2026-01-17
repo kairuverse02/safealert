@@ -346,7 +346,12 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
               
               if (line.startsWith('m=')) {
                 // Check if this m-line is disabled (port 9)
-                if (line.includes(' 9 ')) {
+                // Parse the port number: m=<media> <port> ...
+                const parts = line.split(' ');
+                const port = parts[1];
+                const isDisabled = port === '9';
+                
+                if (isDisabled) {
                   console.log('Guardian: Stripping disabled m-line and its attributes:', line);
                   skipNextAttributes = true;
                   mlineIndex++;
