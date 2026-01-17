@@ -306,17 +306,28 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           console.log(`  Transceiver ${i}: direction=${t.direction}, mid=${t.mid}, sender.track=${!!t.sender.track}, receiver.track=${!!t.receiver.track}`);
         });
         
-        // CRITICAL: Verify all transceivers are in sendrecv before creating offer
-        // If not, the browser will still create disabled m-lines (port 9)
-        let allSendrecv = transceivers.every(t => t.direction === 'sendrecv' && t.sender.track);
+        // CRITICAL: Verify only MEDIA transceivers (audio/video) are in sendrecv
+        // Datachannel transceivers don't need sender.track, so exclude them from the check
+        const mediaTransceivers = transceivers.filter(t => {
+          const kind = t.sender.track?.kind || t.receiver.track?.kind;
+          return kind === 'audio' || kind === 'video';
+        });
+        
+        console.log(`[WebRTCContext] Checking ${mediaTransceivers.length} media transceivers for sendrecv state...`);
+        
+        let allSendrecv = mediaTransceivers.every(t => t.direction === 'sendrecv' && t.sender.track);
         let attempts = 0;
         while (!allSendrecv && attempts < 5) {
           console.log(`[WebRTCContext] Waiting for transceiver state propagation (attempt ${attempts + 1}/5)...`);
           await new Promise(resolve => setTimeout(resolve, 20));
           
-          // Check again
+          // Check again - only media transceivers
           const updatedTransceivers = pc.getTransceivers();
-          allSendrecv = updatedTransceivers.every(t => t.direction === 'sendrecv' && t.sender.track);
+          const updatedMediaTransceivers = updatedTransceivers.filter(t => {
+            const kind = t.sender.track?.kind || t.receiver.track?.kind;
+            return kind === 'audio' || kind === 'video';
+          });
+          allSendrecv = updatedMediaTransceivers.every(t => t.direction === 'sendrecv' && t.sender.track);
           if (allSendrecv) {
             console.log('[WebRTCContext] All transceivers ready for offer creation');
             break;
@@ -325,10 +336,10 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         }
         
         if (!allSendrecv) {
-          console.warn('[WebRTCContext] Transceivers may not be fully ready, proceeding anyway');
-          pc.getTransceivers().forEach((t, i) => {
+          console.warn('[WebRTCContext] Media transceivers may not be fully ready, proceeding anyway');
+          mediaTransceivers.forEach((t) => {
             if (t.direction !== 'sendrecv' || !t.sender.track) {
-              console.warn(`  Transceiver ${i}: direction=${t.direction}, has sender=${!!t.sender.track}`);
+              console.warn(`  Media transceiver: direction=${t.direction}, kind=${t.sender.track?.kind || 'unknown'}, has sender=${!!t.sender.track}`);
             }
           });
         }
