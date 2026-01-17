@@ -331,10 +331,17 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
           // Send answer back to dependent (for renegotiation)
           console.log('Guardian: sending answer to dependent (persisting to DB)');
           
-          // CRITICAL FIX: Strip disabled m-lines (port 9) AND their attributes from answer SDP
-          // Also rebuild BUNDLE group to avoid "MID matching no m= section" errors
           let answerToSend = offer as Record<string, unknown>;
-          if (answerToSend && typeof answerToSend.sdp === 'string') {
+          
+          // Only cleanup disabled m-lines for INITIAL answer, not renegotiation answers.
+          // During renegotiation, the answer SDP should match the offer's m-line structure automatically.
+          // If peer is already connected, this is a renegotiation, not initial setup.
+          const isRenegotiation = peerRef.current?.connected || false;
+          console.log('Guardian: Is renegotiation?', isRenegotiation, 'Peer connected:', peerRef.current?.connected);
+          
+          if (!isRenegotiation && answerToSend && typeof answerToSend.sdp === 'string') {
+            // INITIAL ANSWER ONLY: Strip disabled m-lines (port 9) AND their attributes
+            // Also rebuild BUNDLE group to avoid "MID matching no m= section" errors
             const sdpLines = (answerToSend.sdp as string).split('\r\n');
             const filteredLines: string[] = [];
             let skipNextAttributes = false;
@@ -396,6 +403,8 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             const cleanedSdp = filteredLines.join('\r\n');
             answerToSend = { ...answerToSend, sdp: cleanedSdp };
             console.log('Guardian: Answer m-lines after cleanup:', cleanedSdp.split('\r\n').filter(l => l.startsWith('m=')).join(', '));
+          } else if (isRenegotiation) {
+            console.log('Guardian: Skipping answer cleanup for renegotiation - answer should match offer structure');
           }
           
           const resp = await fetch(`/api/signaling/${id}`, {
