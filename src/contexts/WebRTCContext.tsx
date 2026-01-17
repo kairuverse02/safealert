@@ -221,11 +221,33 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         }
       }
       
-      // Use existing transceivers and replace their tracks to enable sending
-      // This avoids creating new m-lines which would violate WebRTC renegotiation rules
-      const transceivers = pc.getTransceivers();
+      // CRITICAL: Create transceivers for all tracks BEFORE the first createOffer
+      // If we started with no stream, transceivers won't exist yet
+      // This ensures consistent m-line structure across offer/answer negotiations
       const streamTracks = stream.getTracks();
-      console.log(`[WebRTCContext] Replacing tracks on ${streamTracks.length} existing transceiver(s)`);
+      console.log(`[WebRTCContext] Ensuring transceivers exist for ${streamTracks.length} track(s)`);
+      
+      for (const track of streamTracks) {
+        let transceiver = pc.getTransceivers().find(t => 
+          (t.receiver?.track?.kind === track.kind) || 
+          (t.sender?.track?.kind === track.kind)
+        );
+        
+        if (!transceiver) {
+          // No transceiver for this track kind - create one
+          console.log(`[WebRTCContext] Creating new transceiver for ${track.kind}`);
+          transceiver = pc.addTransceiver(track, {
+            direction: 'sendrecv',
+            sendEncodings: track.kind === 'video' 
+              ? [{ maxBitrate: 2500000 }] 
+              : undefined
+          });
+        }
+      }
+      
+      // Now replace tracks on the transceivers we just ensured exist
+      const transceivers = pc.getTransceivers();
+      console.log(`[WebRTCContext] Replacing tracks on ${transceivers.length} transceiver(s)`);
       
       for (const track of streamTracks) {
         const transceiver = transceivers.find(t => 
@@ -233,7 +255,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           (t.sender?.track?.kind === track.kind)
         );
         
-        if (transceiver) {
+        if (transceiver && transceiver.sender) {
           console.log(`[WebRTCContext] Replacing ${track.kind} track on transceiver`);
           await transceiver.sender.replaceTrack(track);
           
@@ -268,8 +290,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             }, 3000);
           }
         } else {
-          console.warn(`[WebRTCContext] No transceiver found for ${track.kind} track, falling back to addTrack()`);
-          pc.addTrack(track, stream);
+          console.warn(`[WebRTCContext] Failed to find/create transceiver for ${track.kind} track`);
         }
       }
       
@@ -607,6 +628,22 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       if (nativePc) {
         nativePcRef.current = nativePc;
         console.log('[WebRTCContext] Stored native PC reference');
+        
+        // CRITICAL: Create placeholder transceivers for video and audio NOW
+        // This ensures the m-lines will exist in the answer SDP, preventing m-line mismatch
+        // during renegotiation when we add actual tracks later
+        console.log('[WebRTCContext] Creating placeholder recv-only transceivers for m-line consistency');
+        try {
+          // Add recv-only video transceiver
+          const videoTransceiver = nativePc.addTransceiver('video', { direction: 'recvonly' });
+          console.log('[WebRTCContext] Added recv-only video transceiver, mid:', videoTransceiver.mid);
+          
+          // Add recv-only audio transceiver (though we might not use it initially)
+          const audioTransceiver = nativePc.addTransceiver('audio', { direction: 'recvonly' });
+          console.log('[WebRTCContext] Added recv-only audio transceiver, mid:', audioTransceiver.mid);
+        } catch (e) {
+          console.warn('[WebRTCContext] Failed to add placeholder transceivers:', e);
+        }
         
         // CRITICAL: Prevent simple-peer from closing the native PC when data channel fails
         // Override the peer's destroy method to NOT close the native PC
