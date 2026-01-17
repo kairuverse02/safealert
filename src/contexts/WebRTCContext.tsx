@@ -239,10 +239,15 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             );
             
             if (matchingTransceiver) {
-              // Reuse existing transceiver by setting the track on the sender
+              // CRITICAL: Change transceiver direction from recvonly to sendrecv BEFORE replacing track
+              // This activates the sender side of the transceiver
+              console.log(`[WebRTCContext] Changing ${track.kind} transceiver direction from ${matchingTransceiver.direction} to sendrecv`);
+              matchingTransceiver.direction = 'sendrecv';
+              
+              // Now replace the track on the activated sender
               console.log(`[WebRTCContext] Reusing existing ${track.kind} transceiver instead of creating new one`);
               matchingTransceiver.sender.replaceTrack(track).then(() => {
-                console.log(`[WebRTCContext] Replaced ${track.kind} track on existing transceiver`);
+                console.log(`[WebRTCContext] Replaced ${track.kind} track on existing transceiver, sender transport should now be active`);
               }).catch((e) => {
                 console.error(`[WebRTCContext] Failed to replace ${track.kind} track:`, e);
               });
