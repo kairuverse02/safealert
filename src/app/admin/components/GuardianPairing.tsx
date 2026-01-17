@@ -151,40 +151,50 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
     applyingAnswerRef.current = false;
     hasStartedPollingRef.current = false;
 
-    // Do NOT get guardian camera automatically at room creation to avoid prompting permissions.
-    // The guardian can enable their local camera manually after the room is created.
-    // CRITICAL FIX: Create dummy audio/video tracks so that simple-peer's initial offer
-    // includes REAL m-lines (not port 9). Without this, audio m-line gets disabled in the
-    // initial offer and can't be re-enabled in renegotiation.
-    let dummyStream: MediaStream | undefined;
+    // CRITICAL FIX: Acquire REAL camera before creating Peer so initial offer has valid m-lines
+    // If camera permission denied, fall back to dummy stream
+    let localStream: MediaStream | undefined;
     try {
-      const audioCtx = new AudioContext();
-      const dummyAudioTrack = audioCtx.createMediaStreamDestination().stream.getTracks()[0];
-      
-      // Create a silent video track using canvas
-      const canvas = document.createElement('canvas');
-      canvas.width = 1;
-      canvas.height = 1;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, 1, 1);
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const dummyVideoTrack = (canvas as any).captureStream(30).getVideoTracks()[0];
-      
-      dummyStream = new MediaStream();
-      if (dummyAudioTrack) dummyStream.addTrack(dummyAudioTrack);
-      if (dummyVideoTrack) dummyStream.addTrack(dummyVideoTrack);
-      console.log('Guardian: Created dummy media stream for initial offer (audio+video enabled)');
+      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      localStream = s;
+      streamRef.current = s;
+      setLocalCameraActive(true);
+      setLocalCameraError(null);
+      if (localVideoRef.current) localVideoRef.current.srcObject = s;
+      console.log('Guardian: Acquired REAL camera for initial offer');
     } catch (err) {
-      console.warn('Guardian: Failed to create dummy media stream', err);
-      dummyStream = undefined;
+      console.warn('Guardian: Failed to acquire camera, falling back to dummy stream', err);
+      setLocalCameraError(String((err as Error)?.message || String(err)));
+      
+      // Fallback: Use dummy stream if camera permission denied
+      try {
+        const audioCtx = new AudioContext();
+        const dummyAudioTrack = audioCtx.createMediaStreamDestination().stream.getTracks()[0];
+        
+        // Create a silent video track using canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = 1;
+        canvas.height = 1;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(0, 0, 1, 1);
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const dummyVideoTrack = (canvas as any).captureStream(30).getVideoTracks()[0];
+        
+        localStream = new MediaStream();
+        if (dummyAudioTrack) localStream.addTrack(dummyAudioTrack);
+        if (dummyVideoTrack) localStream.addTrack(dummyVideoTrack);
+        console.log('Guardian: Created DUMMY media stream as fallback');
+        streamRef.current = null;
+      } catch (dummyErr) {
+        console.error('Guardian: Failed to create even dummy stream', dummyErr);
+        localStream = undefined;
+      }
     }
     
-    const localStream: MediaStream | undefined = dummyStream;
-    streamRef.current = null;
-    // clear any previous camera error
+    // clear any previous room creation error
     setErrorMsg(null);
 
     // Create the room record first (with empty signals) so dependent can find it
