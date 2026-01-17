@@ -556,44 +556,28 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                           if (newOffer && newOffer.type === 'offer' && peerRef.current) {
                             const offerSdp = newOffer.sdp;
                             if (offerSdp && offerSdp !== lastProcessedOfferSdpRef.current) {
-                              console.log('Guardian: received NEW renegotiation offer, inspecting m-lines...');
-                              
+                              console.log('Guardian: received NEW renegotiation offer');
+
+                              // --- FIX START ---
                               const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                              
-                              // --- FIX START: Add missing transceivers based on Offer SDP ---
                               if (pc) {
-                                const hasVideoOffer = /m=video/.test(offerSdp);
-                                const hasAudioOffer = /m=audio/.test(offerSdp);
-                                const transceivers = pc.getTransceivers();
-                                
-                                const hasVideoTransceiver = transceivers.some(t => t.receiver.track?.kind === 'video' || t.sender.track?.kind === 'video');
-                                const hasAudioTransceiver = transceivers.some(t => t.receiver.track?.kind === 'audio' || t.sender.track?.kind === 'audio');
+                                 // Check if the Offer has an Audio m-line
+                                 const offerHasAudio = /m=audio/.test(offerSdp);
+                                 
+                                 // Check if we have an Audio transceiver
+                                 const hasAudioTransceiver = pc.getTransceivers().some(t => 
+                                   t.receiver.track?.kind === 'audio' || t.sender.track?.kind === 'audio'
+                                 );
 
-                                // If offer wants video but we have no slot, add one
-                                if (hasVideoOffer && !hasVideoTransceiver) {
-                                    console.log('[Guardian] Offer has video but no transceiver found. Adding recvonly video.');
-                                    pc.addTransceiver('video', { direction: 'recvonly' });
-                                }
-
-                                // If offer wants audio but we have no slot, add one (This is the missing piece!)
-                                if (hasAudioOffer && !hasAudioTransceiver) {
-                                    console.log('[Guardian] Offer has audio but no transceiver found. Adding recvonly audio.');
-                                    pc.addTransceiver('audio', { direction: 'recvonly' });
-                                }
-
-                                // Ensure all existing transceivers are active
-                                console.log('[Guardian] Ensuring transceivers sendrecv/recvonly before answer.');
-                                pc.getTransceivers().forEach(t => {
-                                    if (t.direction !== 'sendrecv' && t.direction !== 'recvonly') {
-                                        t.direction = 'recvonly'; // Default to receiving if we aren't sending
-                                    }
-                                });
+                                 // If Offer has Audio but we don't, we MUST add a transceiver to accept it
+                                 if (offerHasAudio && !hasAudioTransceiver) {
+                                   console.log('[Guardian] Offer contains audio, but no transceiver found. Adding audio transceiver.');
+                                   pc.addTransceiver('audio', { direction: 'recvonly' });
+                                 }
                               }
                               // --- FIX END ---
-                              
+
                               lastProcessedOfferSdpRef.current = offerSdp;
-                              
-                              // Now signal simple-peer, which will create the Answer with the correct m-lines
                               peerRef.current.signal(newOffer);
                             }
                           }
