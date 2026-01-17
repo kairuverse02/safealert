@@ -225,9 +225,13 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           try { videoRef.current.load(); } catch {}
           videoRef.current.play().catch(() => {});
         }
-        // Force a reattach if HAVE_NOTHING persists (e.g., 0.5s of frames)
-        if (haveNothingStreakRef.current > 30) {
+        // FIX: Increase this threshold! 
+        // 30 frames is only ~0.5 seconds. WebRTC needs 2-5 seconds to buffer keyframes.
+        // Set to 300 (approx 5 seconds) to give the connection time to settle.
+        if (haveNothingStreakRef.current > 300) {
+          console.warn('MonitoringSystem: Stuck in HAVE_NOTHING for 5s, forcing reattach...');
           forceReattachRemoteVideo();
+          haveNothingStreakRef.current = 0; // Reset counter
         }
       } else if (readyState === videoRef.current.HAVE_CURRENT_DATA) {
         console.log('MonitoringSystem: video readyState is HAVE_CURRENT_DATA (1) - has current frame');
