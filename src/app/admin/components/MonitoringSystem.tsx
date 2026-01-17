@@ -35,6 +35,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
   const lastFrameDataRef = useRef<Uint8ClampedArray | null>(null);
   const animationFrameIdRef = useRef<number | null>(null);
   const lastAlertTimeRef = useRef(0);
+  const lastPlayKickRef = useRef(0); // throttle play/load kicks when readyState stalls
 
   const [currentMode, setCurrentMode] = useState<MonitoringMode>("idle");
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
@@ -194,6 +195,13 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     if (readyState < videoRef.current.HAVE_METADATA) {
       if (readyState === videoRef.current.HAVE_NOTHING) {
         console.log('MonitoringSystem: video readyState is HAVE_NOTHING (0) - no data loaded yet');
+        // Actively kick playback if we appear stuck
+        const now = Date.now();
+        if (remoteStream && now - lastPlayKickRef.current > 1000) {
+          lastPlayKickRef.current = now;
+          try { videoRef.current.load(); } catch {}
+          videoRef.current.play().catch(() => {});
+        }
       } else if (readyState === videoRef.current.HAVE_CURRENT_DATA) {
         console.log('MonitoringSystem: video readyState is HAVE_CURRENT_DATA (1) - has current frame');
       }
@@ -425,10 +433,44 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
             console.warn('MonitoringSystem: remote video play failed', err);
           }
         });
+        // If metadata never loads (common when tracks start muted), kick the element after a short delay
+        setTimeout(() => {
+          if (!videoRef.current) return;
+          if (videoRef.current.readyState === videoRef.current.HAVE_NOTHING) {
+            try { videoRef.current.load(); } catch {}
+            videoRef.current.play().catch(() => {});
+          }
+        }, 200);
       } catch (e) {
         console.warn('MonitoringSystem: failed to attach remote stream', e);
       }
     }
+  }, [remoteStream]);
+
+  // Ensure tracks that start muted still trigger playback once data begins flowing
+  useEffect(() => {
+    if (!remoteStream) return;
+    const kickPlayback = () => {
+      if (!videoRef.current) return;
+      try { videoRef.current.srcObject = remoteStream; } catch {}
+      videoRef.current.muted = true;
+      try { videoRef.current.load(); } catch {}
+      videoRef.current.play().catch(() => {});
+    };
+
+    // Attach to existing tracks
+    remoteStream.getTracks().forEach((track) => {
+      track.onunmute = kickPlayback;
+    });
+
+    // Also react to future track additions
+    const handleAddTrack = () => kickPlayback();
+    remoteStream.addEventListener('addtrack', handleAddTrack);
+
+    return () => {
+      remoteStream.removeEventListener('addtrack', handleAddTrack);
+      remoteStream.getTracks().forEach((track) => { track.onunmute = null; });
+    };
   }, [remoteStream]);
 
   const handleStartStopCamera = async () => {
