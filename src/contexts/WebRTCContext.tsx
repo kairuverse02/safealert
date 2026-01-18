@@ -221,18 +221,36 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         }
       }
       
-      // Add tracks directly to PC - this creates new active transceivers
-      // Don't try to reuse old inactive transceivers from initial pairing
-      const streamTracks = stream.getTracks();
+      // Get existing transceivers from initial pairing
+      const transceivers = pc.getTransceivers();
+      console.log(`[WebRTCContext] Found ${transceivers.length} existing transceivers`);
       
-      console.log(`[WebRTCContext] Adding ${streamTracks.length} tracks directly to PC`);
+      // Map tracks to transceivers by kind
+      const audioTrack = stream.getAudioTracks()[0];
+      const videoTrack = stream.getVideoTracks()[0];
       
-      for (const track of streamTracks) {
-        const kind = track.kind as 'audio' | 'video';
-        console.log(`[WebRTCContext] Adding ${kind} track via addTrack`);
-        pc.addTrack(track, stream);
-        console.log(`[WebRTCContext] ✅ Added ${kind} track`);
+      const audioTransceiver = transceivers.find(t => t.receiver.track.kind === 'audio');
+      const videoTransceiver = transceivers.find(t => t.receiver.track.kind === 'video');
+      
+      // If transceivers exist, replace their tracks and set direction
+      if (audioTransceiver && audioTrack) {
+        console.log('[WebRTCContext] Reusing audio transceiver, setting track and direction=sendrecv');
+        await audioTransceiver.sender.replaceTrack(audioTrack);
+        audioTransceiver.direction = 'sendrecv';
+      } else if (audioTrack) {
+        console.log('[WebRTCContext] Creating new audio transceiver via addTrack');
+        pc.addTrack(audioTrack, stream);
       }
+      
+      if (videoTransceiver && videoTrack) {
+        console.log('[WebRTCContext] Reusing video transceiver, setting track and direction=sendrecv');
+        await videoTransceiver.sender.replaceTrack(videoTrack);
+        videoTransceiver.direction = 'sendrecv';
+      } else if (videoTrack) {
+        console.log('[WebRTCContext] Creating new video transceiver via addTrack');
+        pc.addTrack(videoTrack, stream);
+      }
+      
       // Create renegotiation offer
       console.log('[WebRTCContext] Creating renegotiation offer...');
       
