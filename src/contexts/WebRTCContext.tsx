@@ -289,7 +289,12 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       // Create renegotiation offer
       console.log('[WebRTCContext] Creating renegotiation offer...');
       
-      const offer = await pc.createOffer();
+      // CRITICAL: Use offerToReceiveAudio/Video: false to prevent browser from adding recv-only transceivers
+      // The transceivers we configured above should be used as-is
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: false,
+        offerToReceiveVideo: false
+      });
       
       // CRITICAL: Do NOT retry with direction cycling - it breaks m-line stability
       // The m-line order must remain constant across renegotiations.
