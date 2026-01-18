@@ -236,19 +236,10 @@ export default function PatientScanner({ initialRoomId }: PatientScannerProps) {
   // Redirect to dashboard when monitoring starts
   useEffect(() => {
     if (isPaired && isMonitoringActive && connectionState === 'connected') {
-      console.log('[PatientScanner] Monitoring active and connected, cleaning up preview stream');
+      console.log('[PatientScanner] Monitoring active and connected, redirecting to dashboard');
       
-      // Stop preview stream to avoid camera conflicts
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => {
-          track.stop();
-          console.log('[PatientScanner] Stopped preview track:', track.kind);
-        });
-        localStreamRef.current = null;
-        if (myVideoRef.current) {
-          myVideoRef.current.srcObject = null;
-        }
-      }
+      // DO NOT stop the preview stream - it's being used for monitoring!
+      // The WebRTCContext manages the stream lifecycle
       
       console.log('[PatientScanner] Redirecting to dashboard');
       router.push('/client/dashboard');
