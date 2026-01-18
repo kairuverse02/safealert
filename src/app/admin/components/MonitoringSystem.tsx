@@ -1132,8 +1132,8 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
         <div className="relative w-full rounded-tl-md rounded-bl-md bg-gray-900 overflow-hidden flex items-center justify-center col-span-2">
           <video
             ref={videoRef}
-            className="absolute top-0 left-0 w-full h-full object-cover"
-            style={{ transform: "scaleX(-1)" }} // Flip video element for intuitive view
+            className="absolute top-0 left-0 w-full h-full object-contain"
+            style={{ transform: "scaleX(-1)", zIndex: 1 }} // Flip video element for intuitive view, ensure it's visible
             playsInline
             autoPlay
             muted
