@@ -257,6 +257,11 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           console.log(`[WebRTCContext] ✅ Created ${kind} transceiver: mid=${newT.mid}`);
         }
       }
+      
+      // CRITICAL: Wait for transceivers to fully activate before creating offer
+      // The browser needs time to process the track replacement and activate the transceiver
+      console.log('[WebRTCContext] Waiting 100ms for transceivers to activate...');
+      await new Promise(resolve => setTimeout(resolve, 100));
       // Create renegotiation offer
       console.log('[WebRTCContext] Creating renegotiation offer...');
       
