@@ -648,41 +648,33 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
               if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
                 console.log('Guardian: ICE connected, marking as paired');
                 
-                // CRITICAL FIX: Remove dummy tracks BEFORE renegotiation so answer has real ports
-                // The dummy tracks prevent video m-line from being enabled in answer SDP
+                // CRITICAL FIX: Remove ALL sender tracks so Guardian only receives
+                // This ensures answer SDP will have active receive ports, not port 9
                 try {
                   const senders = pc.getSenders();
+                  console.log('Guardian: Removing all sender tracks. Count:', senders.length);
                   for (const sender of senders) {
-                    if (sender.track && (sender.track.kind === 'audio' || sender.track.kind === 'video')) {
-                      // Dummy canvas video tracks will have 'stream' label or be disabled
-                      const isDummy = !sender.track.enabled || sender.track.label.includes('stream');
-                      if (isDummy) {
-                        console.log(`Guardian: Removing dummy ${sender.track.kind} track before renegotiation`);
-                        try {
-                          pc.removeTrack(sender);
-                        } catch (e) {
-                          console.warn(`Guardian: Exception removing dummy ${sender.track.kind} track`, e);
-                        }
-                      }
+                    if (sender.track) {
+                      console.log(`Guardian: Removing ${sender.track.kind} sender track`);
+                      pc.removeTrack(sender);
                     }
                   }
                 } catch (err) {
-                  console.warn('Guardian: Failed to remove dummy tracks', err);
+                  console.warn('Guardian: Failed to remove sender tracks', err);
                 }
                 
-                // CRITICAL FIX: Set all transceivers to sendrecv IMMEDIATELY on ICE connection
-                // This ensures that when renegotiation offers arrive, the answer will have
-                // real ports instead of port 9. This must happen BEFORE any renegotiation offer.
+                // Set all transceivers to recvonly
                 try {
                   const transceivers = pc.getTransceivers();
-                  console.log('Guardian: Setting all transceivers to sendrecv on ICE connected. Count:', transceivers.length);
+                  console.log('Guardian: Setting all transceivers to recvonly on ICE connected. Count:', transceivers.length);
                   for (const transceiver of transceivers) {
-                    if ((transceiver.receiver?.track?.kind === 'video' || transceiver.receiver?.track?.kind === 'audio' ||
-                         transceiver.sender?.track?.kind === 'video' || transceiver.sender?.track?.kind === 'audio') &&
-                        transceiver.direction !== 'sendrecv') {
-                      const oldDirection = transceiver.direction;
-                      transceiver.direction = 'sendrecv';
-                      console.log(`Guardian: Set transceiver to sendrecv (was ${oldDirection})`);
+                    if (transceiver.mid !== null && transceiver.mid !== undefined) {
+                      const kind = transceiver.receiver?.track?.kind || transceiver.sender?.track?.kind;
+                      if (kind === 'video' || kind === 'audio') {
+                        const oldDirection = transceiver.direction;
+                        transceiver.direction = 'recvonly';
+                        console.log(`Guardian: Set ${kind} transceiver to recvonly (was ${oldDirection})`);
+                      }
                     }
                   }
                 } catch (err) {
