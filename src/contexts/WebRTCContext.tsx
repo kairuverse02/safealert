@@ -221,47 +221,18 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         }
       }
       
-      // Replace tracks on existing transceivers to maintain m-line stability
-      const existingTransceivers = pc.getTransceivers();
+      // Add tracks directly to PC - this creates new active transceivers
+      // Don't try to reuse old inactive transceivers from initial pairing
       const streamTracks = stream.getTracks();
       
-      console.log(`[WebRTCContext] Found ${existingTransceivers.length} existing transceivers, ${streamTracks.length} tracks to add`);
+      console.log(`[WebRTCContext] Adding ${streamTracks.length} tracks directly to PC`);
       
-      // Group transceivers by kind
-      const transceiversByKind: Record<string, RTCRtpTransceiver[]> = { audio: [], video: [] };
-      for (const t of existingTransceivers) {
-        const kind = t.receiver?.track?.kind || t.sender?.track?.kind;
-        if (kind === 'audio' || kind === 'video') {
-          transceiversByKind[kind].push(t);
-        }
-      }
-      
-      // Replace tracks on existing transceivers
       for (const track of streamTracks) {
         const kind = track.kind as 'audio' | 'video';
-        const available = transceiversByKind[kind];
-        
-        if (available && available.length > 0) {
-          const t = available[0];
-          console.log(`[WebRTCContext] Replacing ${kind} track on transceiver mid=${t.mid}`);
-          await t.sender.replaceTrack(track);
-          t.direction = 'sendrecv';
-          console.log(`[WebRTCContext] ✅ Replaced ${kind} track: mid=${t.mid}, direction=${t.direction}`);
-          transceiversByKind[kind].shift();
-        } else {
-          console.log(`[WebRTCContext] ➕ Creating new ${kind} transceiver`);
-          const newT = pc.addTransceiver(track, {
-            direction: 'sendrecv',
-            sendEncodings: kind === 'video' ? [{ maxBitrate: 2500000 }] : undefined
-          });
-          console.log(`[WebRTCContext] ✅ Created ${kind} transceiver: mid=${newT.mid}`);
-        }
+        console.log(`[WebRTCContext] Adding ${kind} track via addTrack`);
+        pc.addTrack(track, stream);
+        console.log(`[WebRTCContext] ✅ Added ${kind} track`);
       }
-      
-      // CRITICAL: Wait for transceivers to fully activate before creating offer
-      // The browser needs time to process the track replacement and activate the transceiver
-      console.log('[WebRTCContext] Waiting 100ms for transceivers to activate...');
-      await new Promise(resolve => setTimeout(resolve, 100));
       // Create renegotiation offer
       console.log('[WebRTCContext] Creating renegotiation offer...');
       
