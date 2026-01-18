@@ -393,7 +393,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     ctx.restore();
 
     lastFrameDataRef.current = new Uint8ClampedArray(currentFrameData);
-  }, [drawPerimeter, checkPerimeterCrossing, triggerAlert, remoteStream, forceReattachRemoteVideo]);
+  }, [drawPerimeter, checkPerimeterCrossing, triggerAlert, remoteStream, forceReattachRemoteVideo, cameraStatus]);
 
   // --- Patient Motion Alert ---
   useEffect(() => {
@@ -1145,7 +1145,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
             <button
               disabled
               className="bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-all w-full cursor-not-allowed"
-              title="Monitoring paired dependent's camera"
+              title="Monitoring paired dependent&apos;s camera"
             >
               Remote Feed
             </button>
