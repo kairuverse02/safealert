@@ -38,6 +38,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
   const lastPlayKickRef = useRef(0); // throttle play/load kicks when readyState stalls
   const haveNothingStreakRef = useRef(0); // consecutive HAVE_NOTHING frames
   const lastReattachRef = useRef(0); // throttle forced reattach attempts
+  const lastHaveNothingLogRef = useRef(0); // throttle HAVE_NOTHING console logs
 
   // Track if we have a valid video feed (not just remoteStream)
   const [hasVideoFeed, setHasVideoFeed] = useState(false);
@@ -259,9 +260,15 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     if (readyState < videoRef.current.HAVE_METADATA) {
       if (readyState === videoRef.current.HAVE_NOTHING) {
         haveNothingStreakRef.current += 1;
-        console.log('MonitoringSystem: video readyState is HAVE_NOTHING (0) - no data loaded yet');
-        // Actively kick playback if we appear stuck
+        
+        // Only log once every 3 seconds to avoid console spam
         const now = Date.now();
+        if (now - lastHaveNothingLogRef.current > 3000) {
+          console.log('MonitoringSystem: video readyState is HAVE_NOTHING (0) - no data loaded yet. Streak:', haveNothingStreakRef.current);
+          lastHaveNothingLogRef.current = now;
+        }
+        
+        // Actively kick playback if we appear stuck (throttled to once per second)
         if (remoteStream && now - lastPlayKickRef.current > 1000) {
           lastPlayKickRef.current = now;
           try { videoRef.current.load(); } catch {}
@@ -275,7 +282,10 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           haveNothingStreakRef.current = 0;
         }
       } else if (readyState === videoRef.current.HAVE_CURRENT_DATA) {
-        console.log('MonitoringSystem: video readyState is HAVE_CURRENT_DATA (1) - has current frame');
+        // Only log state changes, not every frame
+        if (haveNothingStreakRef.current > 0) {
+          console.log('MonitoringSystem: video readyState is HAVE_CURRENT_DATA (1) - has current frame');
+        }
         haveNothingStreakRef.current = 0;
       }
       return;
