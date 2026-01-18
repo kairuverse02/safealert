@@ -809,9 +809,22 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
 
                 // AUTOMATICALLY send start_monitor command when video is received
                 // This redirects the dependent to their dashboard immediately
-                if (videoTracks > 0 && !isMonitoring) {
+                if (videoTracks > 0) {
                   console.log('[Guardian] Video received, automatically sending start_monitor command');
-                  setTimeout(() => sendMonitoringRequest(true), 500);
+                  setTimeout(async () => {
+                    try {
+                      const resp = await fetch(`/api/signaling/${id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ guardian_command: 'start_monitor' }),
+                      });
+                      console.log('[Guardian] Auto start_monitor sent:', resp.status);
+                      setIsMonitoring(true);
+                      setShowMonitoring(true);
+                    } catch (err) {
+                      console.error('[Guardian] Failed to auto-send start_monitor:', err);
+                    }
+                  }, 500);
                 }
 
                 // Mark audio received if we have audio tracks (for mic test diagnostics)
