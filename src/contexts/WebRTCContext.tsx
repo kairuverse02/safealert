@@ -442,23 +442,6 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
     setLocalStream(stream);
     
     try {
-      // Fetch reliable ICE servers from backend
-      let iceServers: RTCIceServer[] = [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' },
-      ];
-      
-      try {
-        const res = await fetch('/api/ice');
-        const data = await res.json();
-        if (data.iceServers && Array.isArray(data.iceServers)) {
-          iceServers = data.iceServers;
-        }
-      } catch (e) {
-        console.warn('[WebRTCContext] Failed to fetch Twilio ICE servers, using default', e);
-      }
-
       // Create peer connection WITHOUT stream initially to avoid m-line mismatch
       // Stream will be added when guardian sends start_monitor command
       const peer = new Peer({
@@ -467,7 +450,31 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         stream: undefined, // Don't send stream initially
         channelConfig: { negotiated: true, id: 0 }, // Pre-negotiated channel prevents WebRTC from negotiating it
         config: {
-          iceServers: iceServers,
+          iceServers: [
+            {
+              urls: "stun:stun.relay.metered.ca:80",
+            },
+            {
+              urls: "turn:global.relay.metered.ca:80",
+              username: "66f0d9c5585efc86319b927d",
+              credential: "tIe5mdHNHIqYZtD8",
+            },
+            {
+              urls: "turn:global.relay.metered.ca:80?transport=tcp",
+              username: "66f0d9c5585efc86319b927d",
+              credential: "tIe5mdHNHIqYZtD8",
+            },
+            {
+              urls: "turn:global.relay.metered.ca:443",
+              username: "66f0d9c5585efc86319b927d",
+              credential: "tIe5mdHNHIqYZtD8",
+            },
+            {
+              urls: "turns:global.relay.metered.ca:443?transport=tcp",
+              username: "66f0d9c5585efc86319b927d",
+              credential: "tIe5mdHNHIqYZtD8",
+            },
+          ],
           iceCandidatePoolSize: 10,
           iceTransportPolicy: 'all',
           bundlePolicy: 'max-bundle',
