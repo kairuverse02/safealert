@@ -929,19 +929,29 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
               console.log('[REALTIME] Received renegotiation offer from dependent during monitoring');
               
               // CRITICAL: Before simple-peer processes this offer and creates an answer,
-              // we MUST ensure all transceivers are in sendrecv state
+              // we MUST ensure all transceivers are ready to receive media
               try {
                 const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
                 if (pc) {
                   const transceivers = pc.getTransceivers();
-                  console.log('[REALTIME] Ensuring transceivers sendrecv before answer. Count:', transceivers.length);
+                  console.log('[REALTIME] Ensuring transceivers ready before answer. Count:', transceivers.length);
+                  
+                  // Log current transceiver states
+                  transceivers.forEach((t, idx) => {
+                    console.log(`[REALTIME] Transceiver ${idx}: mid=${t.mid} direction=${t.direction} kind=${t.receiver?.track?.kind || t.sender?.track?.kind || 'unknown'}`);
+                  });
+                  
+                  // Set ALL transceivers to recvonly or sendrecv to ensure they accept media
                   for (const transceiver of transceivers) {
-                    if ((transceiver.receiver?.track?.kind === 'video' || transceiver.receiver?.track?.kind === 'audio' ||
-                         transceiver.sender?.track?.kind === 'video' || transceiver.sender?.track?.kind === 'audio') &&
-                        transceiver.direction !== 'sendrecv') {
+                    // Skip data channel transceivers
+                    if (transceiver.mid === null || transceiver.mid === undefined) continue;
+                    
+                    const kind = transceiver.receiver?.track?.kind || transceiver.sender?.track?.kind;
+                    if (kind === 'video' || kind === 'audio') {
                       const oldDirection = transceiver.direction;
-                      transceiver.direction = 'sendrecv';
-                      console.log(`[REALTIME] Updated transceiver direction to sendrecv (was ${oldDirection})`);
+                      // Set to recvonly to accept incoming media
+                      transceiver.direction = 'recvonly';
+                      console.log(`[REALTIME] Set ${kind} transceiver to recvonly (was ${oldDirection})`);
                     }
                   }
                 }
