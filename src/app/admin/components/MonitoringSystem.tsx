@@ -1087,7 +1087,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           <video
             ref={videoRef}
             className="absolute top-0 left-0 w-full h-full object-cover"
-            style={{ transform: "scaleX(-1)" }} // Flip video element for intuitive view
+            style={{ transform: "scaleX(-1)", zIndex: 5 }} // Flip video element for intuitive view
             playsInline
             autoPlay
             muted
