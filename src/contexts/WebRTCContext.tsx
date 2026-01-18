@@ -161,19 +161,31 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
     }
     
     // Stream is already being sent from initial pairing
-    // Just mark monitoring as active
+    // Check if stream has audio tracks
     const audioCount = localStream?.getAudioTracks().length || 0;
     if (audioCount === 0) {
-      console.warn('[WebRTCContext] No audio tracks available');
-      await publishGuardianEvent('patient_microphone_unavailable', 'Microphone not available');
-      setIsMonitoringActive(false);
-    } else {
-      console.log('[WebRTCContext] Setting isMonitoringActive to true');
-      setIsMonitoringActive(true);
+      console.warn('[WebRTCContext] No audio tracks in localStream, checking peer connection');
+      // Get tracks from peer connection instead
+      const pc = nativePcRef.current || (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+      if (pc) {
+        const senders = pc.getSenders();
+        const audioSender = senders.find(s => s.track?.kind === 'audio');
+        if (!audioSender || !audioSender.track) {
+          console.warn('[WebRTCContext] No audio tracks in peer connection either');
+          const roomId = roomIdRef.current || currentRoomId;
+          if (roomId) {
+            await publishGuardianEvent('patient_microphone_unavailable', 'Microphone not available');
+          }
+          setIsMonitoringActive(false);
+          return;
+        }
+      }
     }
     
+    console.log('[WebRTCContext] Setting isMonitoringActive to true');
+    setIsMonitoringActive(true);
     console.log('[WebRTCContext] Monitoring started successfully');
-  }, [localStream, publishGuardianEvent]);
+  }, [localStream, currentRoomId, publishGuardianEvent]);
 
   // Stop monitoring
   const stopMonitoring = useCallback(() => {
