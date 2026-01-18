@@ -809,7 +809,7 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
 
                 // AUTOMATICALLY send start_monitor command when video is received
                 // This redirects the dependent to their dashboard immediately
-                if (videoTracks > 0 && !isMonitoring && roomId) {
+                if (videoTracks > 0 && !isMonitoring) {
                   console.log('[Guardian] Video received, automatically sending start_monitor command');
                   setTimeout(() => sendMonitoringRequest(true), 500);
                 }
@@ -1201,15 +1201,6 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
             >
               {localCameraActive ? 'Camera Enabled' : 'Enable Local Camera'}
             </button>
-            <div style={{ display: 'flex', flex: 1, alignItems: 'center', gap: 8 }}>
-              <button
-                className={`flex-1 ${isMonitoring ? 'bg-gray-500 hover:bg-gray-600' : 'bg-green-600 hover:bg-green-700'} text-white px-4 py-2 rounded-lg cursor-pointer transition-colors font-medium`}
-                onClick={() => { sendMonitoringRequest(!isMonitoring); if (!showMonitoring) setShowMonitoring(true); }}
-              >
-                {isMonitoring ? 'Stop Monitoring' : 'Start Monitoring'}
-              </button>
-              <div className="text-xs text-gray-500">{isPaired || showMonitoring ? 'Paired' : 'Not connected yet — request will start when dependent is available'}</div>
-            </div>
           </div>
         </div>
       ) : null}
