@@ -153,249 +153,26 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
   // Start monitoring
   const startMonitoring = useCallback(async () => {
     console.log('[WebRTCContext] Starting monitoring...');
-    console.log('[WebRTCContext] Current room ID:', currentRoomId);
+    console.log('[WebRTCContext] Stream already being sent from initial pairing - no renegotiation needed');
     
     if (!peerRef.current) {
       console.error('[WebRTCContext] Cannot start monitoring - no peer connection');
       return;
     }
     
-    const pc = nativePcRef.current || (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-    if (!pc) {
-      console.error('[WebRTCContext] Cannot start monitoring - no native PC');
-      return;
+    // Stream is already being sent from initial pairing
+    // Just mark monitoring as active
+    const audioCount = localStream?.getAudioTracks().length || 0;
+    if (audioCount === 0) {
+      console.warn('[WebRTCContext] No audio tracks available');
+      await publishGuardianEvent('patient_microphone_unavailable', 'Microphone not available');
+      setIsMonitoringActive(false);
+    } else {
+      setIsMonitoringActive(true);
     }
-
-    try {
-      // Use existing stream from pairing (already has camera + mic permissions)
-      // Or request fresh stream if not available
-      let stream = localStream;
-      if (!stream) {
-        console.log('[WebRTCContext] No stored stream, requesting fresh media stream');
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        setLocalStream(stream);
-      }
-      
-      console.log('[WebRTCContext] Got media stream - audio tracks:', stream.getAudioTracks().length, 'video tracks:', stream.getVideoTracks().length);
-      
-      const audioCount = stream.getAudioTracks().length;
-      if (audioCount === 0) {
-        console.warn('[WebRTCContext] No audio tracks available');
-        await publishGuardianEvent('patient_microphone_unavailable', 'Microphone not available');
-        setIsMonitoringActive(false);
-      } else {
-        setIsMonitoringActive(true);
-      }
-      
-      // Add tracks to the EXISTING peer connection (not a new one)
-      // This preserves the m-line order from the initial negotiation
-      console.log('[WebRTCContext] Adding tracks to existing peer connection...');
-      
-      if (pc.signalingState === 'closed') {
-        console.error('[WebRTCContext] Cannot add tracks - PC is closed');
-        return;
-      }
-      
-      // Wait for stable signaling state if needed
-      if (pc.signalingState !== 'stable') {
-        console.log('[WebRTCContext] Waiting for stable signaling state..., current:', pc.signalingState);
-        let isClosed = false;
-        await new Promise<void>((resolve) => {
-          let attempts = 0;
-          const check = setInterval(() => {
-            attempts++;
-            if (pc.signalingState === 'stable') {
-              clearInterval(check);
-              resolve();
-            } else if (pc.signalingState === 'closed' || attempts >= 100) {
-              isClosed = (pc.signalingState === 'closed');
-              clearInterval(check);
-              resolve();
-            }
-          }, 100);
-        });
-        
-        if (isClosed) {
-          console.error('[WebRTCContext] PC closed while waiting for stable state');
-          return;
-        }
-      }
-      
-      // CRITICAL FIX: Don't reuse transceivers from initial pairing
-      // They have currentDirection=inactive and the browser won't activate them
-      // even after replaceTrack() and setting direction=sendrecv
-      // Solution: Use addTrack() to create FRESH transceivers
-      
-      const transceivers = pc.getTransceivers();
-      console.log(`[WebRTCContext] Found ${transceivers.length} existing transceivers - will create fresh ones via addTrack`);
-      
-      // Log existing transceiver states for debugging
-      transceivers.forEach((t, i) => {
-        console.log(`[WebRTCContext] Existing transceiver ${i}: kind=${t.receiver.track.kind} direction=${t.direction} currentDirection=${t.currentDirection} mid=${t.mid}`);
-      });
-      
-      // Map tracks
-      const audioTrack = stream.getAudioTracks()[0];
-      const videoTrack = stream.getVideoTracks()[0];
-      
-      console.log(`[WebRTCContext] Audio track: id=${audioTrack?.id} enabled=${audioTrack?.enabled} readyState=${audioTrack?.readyState}`);
-      console.log(`[WebRTCContext] Video track: id=${videoTrack?.id} enabled=${videoTrack?.enabled} readyState=${videoTrack?.readyState}`);
-      
-      // Add tracks directly - this creates NEW active transceivers
-      // The old inactive transceivers will remain but won't be used in the offer
-      if (audioTrack) {
-        console.log('[WebRTCContext] Adding audio track via addTrack (creates fresh transceiver)');
-        pc.addTrack(audioTrack, stream);
-      }
-      if (videoTrack) {
-        console.log('[WebRTCContext] Adding video track via addTrack (creates fresh transceiver)');
-        pc.addTrack(videoTrack, stream);
-      }
-      
-      // Log all transceivers after adding tracks
-      const finalTransceivers = pc.getTransceivers();
-      console.log(`[WebRTCContext] Total transceivers after addTrack: ${finalTransceivers.length}`);
-      finalTransceivers.forEach((t, i) => {
-        console.log(`[WebRTCContext] Transceiver ${i}: kind=${t.receiver.track.kind} direction=${t.direction} currentDirection=${t.currentDirection} sender.track=${t.sender.track?.id} mid=${t.mid}`);
-      });
-      
-      // Create renegotiation offer
-      console.log('[WebRTCContext] Creating renegotiation offer...');
-      
-      // CRITICAL: Use offerToReceiveAudio/Video: false to prevent browser from adding recv-only transceivers
-      // The transceivers we configured above should be used as-is
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: false,
-        offerToReceiveVideo: false
-      });
-      
-      // CRITICAL: Do NOT retry with direction cycling - it breaks m-line stability
-      // The m-line order must remain constant across renegotiations.
-      // If audio m-line is stuck at port 9, it's a transceiver activation issue
-      // that will be resolved naturally by the browser when the track is truly active.
-      
-      if (offer.sdp && offer.sdp.includes('m=audio 9')) {
-        console.warn('[WebRTCContext] ⚠️ Audio m-line at port 9 in renegotiation offer, but proceeding to maintain m-line stability');
-      }
-      
-      if (offer.sdp) {
-        console.log('[WebRTCContext] Renegotiation offer m-lines:', offer.sdp.split('\r\n').filter(line => line.startsWith('m=')).join(', '));
-      }
-      
-      // CRITICAL: DO NOT strip disabled m-lines from the offer!
-      // WebRTC requires m-line structure to remain constant across renegotiations.
-      // Keep ALL m-lines (including disabled ones with port 9) to maintain consistency.
-      console.log('[WebRTCContext] Sending renegotiation offer with ALL m-lines intact (including disabled ones)');
-      
-      await pc.setLocalDescription(offer);
-      console.log('[WebRTCContext] Renegotiation offer sent, signalingState:', pc.signalingState);
-      
-      // Send renegotiation offer to guardian via API
-      // CRITICAL: Send the FULL offer without stripping m-lines to maintain m-line consistency
-      const roomId = roomIdRef.current || currentRoomId;
-      console.log('[WebRTCContext] Using room ID for renegotiation:', roomId);
-      if (roomId) {
-        try {
-          const resp = await fetch(`/api/signaling/${roomId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ offer_signal: offer }),
-          });
-          console.log('[WebRTCContext] Sent renegotiation offer:', resp.status);
-          
-          if (!resp.ok) {
-            const errorText = await resp.text();
-            console.error('[WebRTCContext] Failed to send renegotiation offer:', resp.status, errorText);
-          }
-          
-          // Poll for guardian's answer
-          if (resp.ok) {
-            console.log('[WebRTCContext] Polling for guardian answer to renegotiation');
-            let lastAppliedAnswerSdp: string | null = null;
-            if (answerPollRef.current) clearInterval(answerPollRef.current);
-            
-            answerPollRef.current = window.setInterval(async () => {
-              try {
-                const answerResp = await fetch(`/api/signaling/${roomId}`);
-                const answerData = await answerResp.json().catch(() => null);
-                const answer = answerData?.data?.answer_signal;
-                
-                console.log('[WebRTCContext] Answer poll result:', { hasAnswer: !!answer, answerType: answer?.type, hasSdp: !!answer?.sdp, signalingState: pc.signalingState });
-                
-                if (answer && answer.type === 'answer' && answer.sdp && answer.sdp !== lastAppliedAnswerSdp) {
-                  // Only apply answer if PC is in "have-local-offer" state
-                  if (pc.signalingState === 'have-local-offer') {
-                    console.log('[WebRTCContext] Received guardian answer, applying (signalingState: have-local-offer)');
-                    console.log('[WebRTCContext] Guardian answer SDP m-lines:', answer.sdp.split('\r\n').filter((line: string) => line.startsWith('m=')).join(', '));
-                    
-                    // --- FIX START: Patch Answer SDP mismatch ---
-                    if (pc.localDescription) {
-                      const offerSdp = pc.localDescription.sdp;
-                      const answerSdp = answer.sdp as string;
-
-                      // Count m-lines
-                      const offerMLines = (offerSdp.match(/^m=/gm) || []).length;
-                      const answerMLines = (answerSdp.match(/^m=/gm) || []).length;
-
-                      if (answerMLines < offerMLines) {
-                        console.warn(`[WebRTCContext] ⚠️ M-Line Mismatch! Offer: ${offerMLines}, Answer: ${answerMLines}. Patching answer...`);
-                        
-                        let patchedSdp = answerSdp.trim();
-                        const missingCount = offerMLines - answerMLines;
-
-                        // Append rejected m-lines (port 0) to satisfy WebRTC requirements
-                        for (let i = 0; i < missingCount; i++) {
-                          // We append a dummy audio line with port 0 (rejected)
-                          patchedSdp += "\r\nm=audio 0 UDP/TLS/RTP/SAVPF 111";
-                        }
-                        
-                        answer.sdp = patchedSdp;
-                        console.log('[WebRTCContext] ✅ Answer SDP patched successfully.');
-                      }
-                    }
-                    // --- FIX END ---
-                    
-                    lastAppliedAnswerSdp = answer.sdp;
-                    
-                    await pc.setRemoteDescription(new RTCSessionDescription(answer));
-                    console.log('[WebRTCContext] Renegotiation complete');
-                    console.log('[WebRTCContext] PC state after answer - signalingState:', pc.signalingState, 'connectionState:', pc.connectionState);
-                    
-                    // Stop polling
-                    if (answerPollRef.current) {
-                      clearInterval(answerPollRef.current);
-                      answerPollRef.current = null;
-                    }
-                  } else if (pc.signalingState === 'stable') {
-                    console.log('[WebRTCContext] Answer received but PC is stable, renegotiation already complete');
-                    if (answerPollRef.current) {
-                      clearInterval(answerPollRef.current);
-                      answerPollRef.current = null;
-                    }
-                  }
-                } else if (answer && answer.sdp === lastAppliedAnswerSdp) {
-                  console.log('[WebRTCContext] Answer SDP already applied, skipping');
-                }
-              } catch (e) {
-                console.warn('[WebRTCContext] Answer poll error:', e);
-              }
-            }, 1000);
-          }
-        } catch (e) {
-          console.error('[WebRTCContext] Error sending renegotiation offer:', e);
-        }
-      }
-      
-      console.log('[WebRTCContext] Monitoring started successfully');
-    } catch (err) {
-      console.error('[WebRTCContext] Failed to start monitoring:', err);
-      const error = err as { message?: string };
-      await publishGuardianEvent(
-        'patient_microphone_permission_denied',
-        `Permission denied: ${error?.message || String(err)}`
-      );
-    }
-  }, [currentRoomId, publishGuardianEvent, localStream]);
+    
+    console.log('[WebRTCContext] Monitoring started successfully');
+  }, [localStream, publishGuardianEvent]);
 
   // Stop monitoring
   const stopMonitoring = useCallback(() => {
@@ -434,13 +211,15 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
     setLocalStream(stream);
     
     try {
-      // Create peer connection WITHOUT stream initially to avoid m-line mismatch
-      // Stream will be added when guardian sends start_monitor command
+      // CRITICAL FIX: Create peer WITH stream from the start
+      // This ensures transceivers are created as active (not inactive)
+      // so they can be used for renegotiation later
+      console.log('[WebRTCContext] Creating peer WITH initial stream to ensure active transceivers');
       const peer = new Peer({
         initiator: false,
         trickle: true,
-        stream: undefined, // Don't send stream initially
-        channelConfig: { negotiated: true, id: 0 }, // Pre-negotiated channel prevents WebRTC from negotiating it
+        stream: stream, // Send stream immediately
+        channelConfig: { negotiated: true, id: 0 },
         config: {
           iceServers: [
             {
@@ -525,11 +304,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       if (nativePc) {
         nativePcRef.current = nativePc;
         console.log('[WebRTCContext] Stored native PC reference');
-        
-        // DO NOT create placeholder transceivers here!
-        // They cause m-line duplication during renegotiation.
-        // Instead, let startMonitoring() create transceivers on-demand when actual tracks are available.
-        console.log('[WebRTCContext] Skipping placeholder transceivers - will create on-demand during startMonitoring');
+        console.log('[WebRTCContext] Transceivers created during initial pairing:', nativePc.getTransceivers().length);
         
         // CRITICAL: Prevent simple-peer from closing the native PC when data channel fails
         // Override the peer's destroy method to NOT close the native PC
