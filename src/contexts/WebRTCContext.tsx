@@ -225,31 +225,66 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       const transceivers = pc.getTransceivers();
       console.log(`[WebRTCContext] Found ${transceivers.length} existing transceivers`);
       
+      // Log transceiver states BEFORE modification
+      transceivers.forEach((t, i) => {
+        console.log(`[WebRTCContext] Transceiver ${i} BEFORE: kind=${t.receiver.track.kind} direction=${t.direction} currentDirection=${t.currentDirection} mid=${t.mid}`);
+      });
+      
       // Map tracks to transceivers by kind
       const audioTrack = stream.getAudioTracks()[0];
       const videoTrack = stream.getVideoTracks()[0];
       
-      const audioTransceiver = transceivers.find(t => t.receiver.track.kind === 'audio');
-      const videoTransceiver = transceivers.find(t => t.receiver.track.kind === 'video');
+      console.log(`[WebRTCContext] Audio track: id=${audioTrack?.id} enabled=${audioTrack?.enabled} readyState=${audioTrack?.readyState}`);
+      console.log(`[WebRTCContext] Video track: id=${videoTrack?.id} enabled=${videoTrack?.enabled} readyState=${videoTrack?.readyState}`);
       
-      // If transceivers exist, replace their tracks and set direction
-      if (audioTransceiver && audioTrack) {
-        console.log('[WebRTCContext] Reusing audio transceiver, setting track and direction=sendrecv');
-        await audioTransceiver.sender.replaceTrack(audioTrack);
-        audioTransceiver.direction = 'sendrecv';
-      } else if (audioTrack) {
-        console.log('[WebRTCContext] Creating new audio transceiver via addTrack');
-        pc.addTrack(audioTrack, stream);
+      // CRITICAL: Only reuse transceivers if they match the expected count (2: audio + video)
+      // If there are more transceivers, it means ghost transceivers from previous sessions
+      if (transceivers.length > 2) {
+        console.warn(`[WebRTCContext] ⚠️ Found ${transceivers.length} transceivers (expected 2) - possible ghost transceivers from previous session`);
+        console.warn('[WebRTCContext] Using addTrack instead of replaceTrack to avoid ghost transceiver issues');
+        
+        // Use addTrack to create fresh transceivers
+        if (audioTrack) {
+          console.log('[WebRTCContext] Adding audio track via addTrack (fresh transceiver)');
+          pc.addTrack(audioTrack, stream);
+        }
+        if (videoTrack) {
+          console.log('[WebRTCContext] Adding video track via addTrack (fresh transceiver)');
+          pc.addTrack(videoTrack, stream);
+        }
+      } else {
+        // Normal case: exactly 2 transceivers from initial pairing
+        const audioTransceiver = transceivers.find(t => t.receiver.track.kind === 'audio');
+        const videoTransceiver = transceivers.find(t => t.receiver.track.kind === 'video');
+        
+        // If transceivers exist, replace their tracks and set direction
+        if (audioTransceiver && audioTrack) {
+          console.log('[WebRTCContext] Reusing audio transceiver, setting track and direction=sendrecv');
+          await audioTransceiver.sender.replaceTrack(audioTrack);
+          audioTransceiver.direction = 'sendrecv';
+          console.log(`[WebRTCContext] Audio transceiver AFTER: direction=${audioTransceiver.direction} sender.track=${audioTransceiver.sender.track?.id}`);
+        } else if (audioTrack) {
+          console.log('[WebRTCContext] Creating new audio transceiver via addTrack');
+          pc.addTrack(audioTrack, stream);
+        }
+        
+        if (videoTransceiver && videoTrack) {
+          console.log('[WebRTCContext] Reusing video transceiver, setting track and direction=sendrecv');
+          await videoTransceiver.sender.replaceTrack(videoTrack);
+          videoTransceiver.direction = 'sendrecv';
+          console.log(`[WebRTCContext] Video transceiver AFTER: direction=${videoTransceiver.direction} sender.track=${videoTransceiver.sender.track?.id}`);
+        } else if (videoTrack) {
+          console.log('[WebRTCContext] Creating new video transceiver via addTrack');
+          pc.addTrack(videoTrack, stream);
+        }
       }
       
-      if (videoTransceiver && videoTrack) {
-        console.log('[WebRTCContext] Reusing video transceiver, setting track and direction=sendrecv');
-        await videoTransceiver.sender.replaceTrack(videoTrack);
-        videoTransceiver.direction = 'sendrecv';
-      } else if (videoTrack) {
-        console.log('[WebRTCContext] Creating new video transceiver via addTrack');
-        pc.addTrack(videoTrack, stream);
-      }
+      // Log transceiver states AFTER modification
+      const finalTransceivers = pc.getTransceivers();
+      console.log(`[WebRTCContext] Total transceivers AFTER modification: ${finalTransceivers.length}`);
+      finalTransceivers.forEach((t, i) => {
+        console.log(`[WebRTCContext] Transceiver ${i}: kind=${t.receiver.track.kind} direction=${t.direction} currentDirection=${t.currentDirection} sender.track=${t.sender.track?.id} mid=${t.mid}`);
+      });
       
       // Create renegotiation offer
       console.log('[WebRTCContext] Creating renegotiation offer...');
