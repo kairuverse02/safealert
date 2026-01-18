@@ -153,7 +153,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
   // Start monitoring
   const startMonitoring = useCallback(async () => {
     console.log('[WebRTCContext] Starting monitoring...');
-    console.log('[WebRTCContext] Stream already being sent from initial pairing - no renegotiation needed');
+    console.log('[WebRTCContext] Stream already being sent from initial pairing - marking as active');
     
     if (!peerRef.current) {
       console.error('[WebRTCContext] Cannot start monitoring - no peer connection');
@@ -168,6 +168,7 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
       await publishGuardianEvent('patient_microphone_unavailable', 'Microphone not available');
       setIsMonitoringActive(false);
     } else {
+      console.log('[WebRTCContext] Setting isMonitoringActive to true');
       setIsMonitoringActive(true);
     }
     
