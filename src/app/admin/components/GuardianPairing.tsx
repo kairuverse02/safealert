@@ -546,29 +546,38 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                           if (newOffer && newOffer.type === 'offer' && peerRef.current) {
                             const offerSdp = newOffer.sdp;
                             if (offerSdp && offerSdp !== lastProcessedOfferSdpRef.current) {
-                              console.log('Guardian: received NEW renegotiation offer');
+                              console.log('[POLL] Guardian: received NEW renegotiation offer');
 
-                              // --- FIX START ---
+                              // CRITICAL: Configure transceivers BEFORE peer.signal() to ensure answer has active ports
                               const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
                               if (pc) {
-                                 // Check if the Offer has an Audio m-line
-                                 const offerHasAudio = /m=audio/.test(offerSdp);
-                                 
-                                 // Check if we have an Audio transceiver
-                                 const hasAudioTransceiver = pc.getTransceivers().some(t => 
-                                   t.receiver.track?.kind === 'audio' || t.sender.track?.kind === 'audio'
-                                 );
-
-                                 // If Offer has Audio but we don't, we MUST add a transceiver to accept it
-                                 if (offerHasAudio && !hasAudioTransceiver) {
-                                   console.log('[Guardian] Offer contains audio, but no transceiver found. Adding audio transceiver.');
-                                   pc.addTransceiver('audio', { direction: 'recvonly' });
-                                 }
+                                const transceivers = pc.getTransceivers();
+                                console.log('[POLL] Ensuring transceivers ready before answer. Count:', transceivers.length);
+                                
+                                // Log current transceiver states
+                                transceivers.forEach((t, idx) => {
+                                  console.log(`[POLL] Transceiver ${idx}: mid=${t.mid} direction=${t.direction} kind=${t.receiver?.track?.kind || t.sender?.track?.kind || 'unknown'}`);
+                                });
+                                
+                                // Set ALL transceivers to recvonly to ensure they accept media
+                                for (const transceiver of transceivers) {
+                                  // Skip data channel transceivers (mid is null/undefined)
+                                  if (transceiver.mid === null || transceiver.mid === undefined) continue;
+                                  
+                                  const kind = transceiver.receiver?.track?.kind || transceiver.sender?.track?.kind;
+                                  if (kind === 'video' || kind === 'audio') {
+                                    const oldDirection = transceiver.direction;
+                                    // Set to recvonly to accept incoming media
+                                    transceiver.direction = 'recvonly';
+                                    console.log(`[POLL] Set ${kind} transceiver to recvonly (was ${oldDirection})`);
+                                  }
+                                }
                               }
-                              // --- FIX END ---
 
                               lastProcessedOfferSdpRef.current = offerSdp;
+                              // Signal the offer - answer is generated synchronously, so transceivers MUST be configured above
                               peerRef.current.signal(newOffer);
+                              console.log('[POLL] Renegotiation offer signaled to peer');
                             }
                           }
                         } catch (e) {
