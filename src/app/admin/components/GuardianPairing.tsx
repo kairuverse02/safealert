@@ -930,36 +930,34 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
               
               // CRITICAL: Before simple-peer processes this offer and creates an answer,
               // we MUST ensure all transceivers are ready to receive media
-              try {
-                const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-                if (pc) {
-                  const transceivers = pc.getTransceivers();
-                  console.log('[REALTIME] Ensuring transceivers ready before answer. Count:', transceivers.length);
+              // This MUST happen BEFORE peer.signal() because answer is generated synchronously
+              const pc = (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
+              if (pc) {
+                const transceivers = pc.getTransceivers();
+                console.log('[REALTIME] Ensuring transceivers ready before answer. Count:', transceivers.length);
+                
+                // Log current transceiver states
+                transceivers.forEach((t, idx) => {
+                  console.log(`[REALTIME] Transceiver ${idx}: mid=${t.mid} direction=${t.direction} kind=${t.receiver?.track?.kind || t.sender?.track?.kind || 'unknown'}`);
+                });
+                
+                // Set ALL transceivers to recvonly to ensure they accept media
+                for (const transceiver of transceivers) {
+                  // Skip data channel transceivers (mid is null/undefined)
+                  if (transceiver.mid === null || transceiver.mid === undefined) continue;
                   
-                  // Log current transceiver states
-                  transceivers.forEach((t, idx) => {
-                    console.log(`[REALTIME] Transceiver ${idx}: mid=${t.mid} direction=${t.direction} kind=${t.receiver?.track?.kind || t.sender?.track?.kind || 'unknown'}`);
-                  });
-                  
-                  // Set ALL transceivers to recvonly or sendrecv to ensure they accept media
-                  for (const transceiver of transceivers) {
-                    // Skip data channel transceivers
-                    if (transceiver.mid === null || transceiver.mid === undefined) continue;
-                    
-                    const kind = transceiver.receiver?.track?.kind || transceiver.sender?.track?.kind;
-                    if (kind === 'video' || kind === 'audio') {
-                      const oldDirection = transceiver.direction;
-                      // Set to recvonly to accept incoming media
-                      transceiver.direction = 'recvonly';
-                      console.log(`[REALTIME] Set ${kind} transceiver to recvonly (was ${oldDirection})`);
-                    }
+                  const kind = transceiver.receiver?.track?.kind || transceiver.sender?.track?.kind;
+                  if (kind === 'video' || kind === 'audio') {
+                    const oldDirection = transceiver.direction;
+                    // Set to recvonly to accept incoming media
+                    transceiver.direction = 'recvonly';
+                    console.log(`[REALTIME] Set ${kind} transceiver to recvonly (was ${oldDirection})`);
                   }
                 }
-              } catch (err) {
-                console.warn('[REALTIME] failed to update transceivers before answer', err);
               }
               
               // Signal the offer to simple-peer, which will trigger answer generation
+              // Answer is generated synchronously, so transceivers MUST be configured above
               peerRef.current.signal(offer as Peer.SignalData | string);
               console.log('[REALTIME] Renegotiation offer signaled to peer');
             } catch (err) {
