@@ -43,6 +43,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [patientMotionFrameCount, setPatientMotionFrameCount] = useState(0);
+  const [cameraStatus, setCameraStatus] = useState<'active' | 'off' | 'not-found' | 'checking'>('checking');
 
   // Dynamic patient motion sensitivity (can be calibrated at runtime)
   const [patientThreshold, setPatientThreshold] = useState(PATIENT_MOTION_THRESHOLD);
@@ -213,6 +214,21 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     const readyState = videoRef.current.readyState;
     const videoWidth = videoRef.current.videoWidth;
     const videoHeight = videoRef.current.videoHeight;
+    
+    // Check if video is actually playing with valid dimensions
+    if (remoteStream) {
+      const videoTracks = remoteStream.getVideoTracks();
+      const hasVideoTrack = videoTracks.length > 0;
+      const videoEnabled = videoTracks.some(t => t.enabled && t.readyState === 'live');
+      
+      if (!hasVideoTrack) {
+        if (cameraStatus !== 'not-found') setCameraStatus('not-found');
+      } else if (!videoEnabled) {
+        if (cameraStatus !== 'off') setCameraStatus('off');
+      } else {
+        if (cameraStatus !== 'active') setCameraStatus('active');
+      }
+    }
     
     if (readyState < videoRef.current.HAVE_METADATA) {
       if (readyState === videoRef.current.HAVE_NOTHING) {
@@ -430,19 +446,36 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           const videoTracks = remoteStream ? remoteStream.getVideoTracks().length : 0;
           console.log('MonitoringSystem: remoteStream has', videoTracks, 'video and', audioTracks, 'audio tracks');
           
-          // Log track details
+          // Log track details and check camera status
           if (remoteStream) {
+            const hasVideoTrack = videoTracks > 0;
+            const videoEnabled = remoteStream.getVideoTracks().some(t => t.enabled && t.readyState === 'live');
+            
+            if (!hasVideoTrack) {
+              console.log('[CAMERA_STATUS] Setting status to not-found (no video tracks)');
+              setCameraStatus('not-found');
+            } else if (!videoEnabled) {
+              console.log('[CAMERA_STATUS] Setting status to off (video tracks disabled or not live)');
+              setCameraStatus('off');
+            } else {
+              console.log('[CAMERA_STATUS] Setting status to active (video tracks enabled and live)');
+              setCameraStatus('active');
+            }
+            
             remoteStream.getVideoTracks().forEach((t, i) => {
               console.log(`  Video track ${i}: enabled=${t.enabled}, readyState=${t.readyState}, id=${t.id.substring(0, 8)}`);
             });
             remoteStream.getAudioTracks().forEach((t, i) => {
               console.log(`  Audio track ${i}: enabled=${t.enabled}, readyState=${t.readyState}, id=${t.id.substring(0, 8)}`);
             });
+          } else {
+            setCameraStatus('checking');
           }
         } catch {}
 
         // If remoteStream is falsy, clear the srcObject and stop any playback
         if (!remoteStream) {
+          setCameraStatus('checking');
           if (videoRef.current.srcObject) {
             videoRef.current.srcObject = null;
             try { videoRef.current.pause(); } catch {}
@@ -497,18 +530,47 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
       }
     };
 
+    const updateCameraStatus = () => {
+      const videoTracks = remoteStream.getVideoTracks();
+      const hasVideoTrack = videoTracks.length > 0;
+      const videoEnabled = videoTracks.some(t => t.enabled && t.readyState === 'live');
+      
+      if (!hasVideoTrack) {
+        setCameraStatus('not-found');
+      } else if (!videoEnabled) {
+        setCameraStatus('off');
+      } else {
+        setCameraStatus('active');
+      }
+    };
+
     // Attach to existing tracks
     remoteStream.getTracks().forEach((track) => {
-      track.onunmute = kickPlayback;
+      track.onunmute = () => {
+        kickPlayback();
+        updateCameraStatus();
+      };
+      track.onended = updateCameraStatus;
+      track.onmute = updateCameraStatus;
     });
 
     // Also react to future track additions
-    const handleAddTrack = () => kickPlayback();
+    const handleAddTrack = () => {
+      kickPlayback();
+      updateCameraStatus();
+    };
     remoteStream.addEventListener('addtrack', handleAddTrack);
+
+    // Initial status check
+    updateCameraStatus();
 
     return () => {
       remoteStream.removeEventListener('addtrack', handleAddTrack);
-      remoteStream.getTracks().forEach((track) => { track.onunmute = null; });
+      remoteStream.getTracks().forEach((track) => { 
+        track.onunmute = null;
+        track.onended = null;
+        track.onmute = null;
+      });
     };
   }, [remoteStream, forceReattachRemoteVideo]);
 
@@ -1005,7 +1067,18 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     <>
       {/* Main container */}
       <div className="w-full mx-auto max-w-6xl bg-[#F0F0F0] rounded-xl shadow-2xl border-2 border-solid border-black p-6 my-4 space-y-4">
-        <h1 className="text-center font-xl font-semibold">{getStatusText()}</h1>
+        <div className="flex justify-between items-center">
+          <h1 className="text-center font-xl font-semibold flex-1">{getStatusText()}</h1>
+          {remoteStream && (
+            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white">
+              <span className="text-sm font-medium">Camera:</span>
+              {cameraStatus === 'active' && <span className="text-green-400 font-bold">● Active</span>}
+              {cameraStatus === 'off' && <span className="text-yellow-400 font-bold">● Off</span>}
+              {cameraStatus === 'not-found' && <span className="text-red-400 font-bold">● Not Found</span>}
+              {cameraStatus === 'checking' && <span className="text-gray-400 font-bold">● Checking...</span>}
+            </div>
+          )}
+        </div>
 
         {/* Video and Log Grid Container*/}
         <div className="grid grid-cols-3">
@@ -1024,13 +1097,32 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           ></video>
           <canvas
             ref={canvasRef}
-            className="absolute top-0 left-0 w-full h-full cursor-crosshair z-10"
+            className="absolute top-0 left-0 w-full h-full cursor-crosshair"
+            style={{ zIndex: currentMode === 'perimeter_setup' || currentMode === 'perimeter_monitoring' ? 10 : -1, pointerEvents: currentMode === 'perimeter_setup' ? 'auto' : 'none' }}
             onClick={handleCanvasClick}
           ></canvas>
           {!(isCameraActive || !!remoteStream) && (
             <div className="absolute inset-0 bg-black bg-opacity-70 text-white flex flex-col items-center justify-center text-center p-4 rounded-tl-md rounded-bl-md">
               <h2 className="text-2xl font-semibold mb-2">Welcome!</h2>
               <p>Start your camera or wait for the dependent to connect their feed.</p>
+            </div>
+          )}
+          {remoteStream && cameraStatus === 'off' && (
+            <div className="absolute inset-0 bg-black bg-opacity-80 text-yellow-400 flex flex-col items-center justify-center text-center p-4 rounded-tl-md rounded-bl-md z-20">
+              <svg className="w-16 h-16 mb-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 3a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1zm0 4a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clipRule="evenodd" />
+              </svg>
+              <h2 className="text-2xl font-semibold mb-2">Dependent Camera Off</h2>
+              <p className="text-sm">The dependent has their camera disabled or turned off.</p>
+            </div>
+          )}
+          {remoteStream && cameraStatus === 'not-found' && (
+            <div className="absolute inset-0 bg-black bg-opacity-80 text-red-400 flex flex-col items-center justify-center text-center p-4 rounded-tl-md rounded-bl-md z-20">
+              <svg className="w-16 h-16 mb-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M13.477 14.89A6 6 0 015.11 6.524l8.367 8.368zm1.414-1.414L6.524 5.11a6 6 0 018.367 8.367zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" clipRule="evenodd" />
+              </svg>
+              <h2 className="text-2xl font-semibold mb-2">Camera Not Found</h2>
+              <p className="text-sm">Unable to detect the dependent's camera feed.</p>
             </div>
           )}
         </div>
