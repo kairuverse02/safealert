@@ -428,29 +428,11 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
             
             const { offer_signal, answer_signal, perimeter_json, guardian_command } = payload.new;
             
-            // Handle offer (renegotiation from guardian)
-            if (offer_signal && peerRef.current) {
-              console.log('[WebRTCContext] Received offer from guardian');
-              
-              // CRITICAL: Before signaling the offer, ensure our transceivers are set to sendonly/sendrecv
-              // so the answer will have active m-lines, not port 9
-              const pc = nativePcRef.current || (peerRef.current as unknown as { _pc?: RTCPeerConnection })?._pc;
-              if (pc) {
-                const transceivers = pc.getTransceivers();
-                console.log('[WebRTCContext] Setting transceivers to sendonly before answering renegotiation. Count:', transceivers.length);
-                for (const transceiver of transceivers) {
-                  if (transceiver.mid !== null && transceiver.mid !== undefined) {
-                    const kind = transceiver.sender?.track?.kind || transceiver.receiver?.track?.kind;
-                    if (kind === 'video' || kind === 'audio') {
-                      transceiver.direction = 'sendonly';
-                      console.log(`[WebRTCContext] Set ${kind} transceiver to sendonly for renegotiation`);
-                    }
-                  }
-                }
-              }
-              
-              peerRef.current.signal(offer_signal as Peer.SignalData | string);
-            }
+            // Handle offer (renegotiation from guardian) - DISABLED: Stream already flowing, no renegotiation needed
+            // if (offer_signal && peerRef.current) {
+            //   console.log('[WebRTCContext] Received offer from guardian');
+            //   peerRef.current.signal(offer_signal as Peer.SignalData | string);
+            // }
             
             // Handle answer
             if (answer_signal && peerRef.current && typeof answer_signal === 'object' && (answer_signal as { type?: string }).type === 'answer') {
