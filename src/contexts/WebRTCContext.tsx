@@ -249,15 +249,16 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
           const t = available[0];
           console.log(`[WebRTCContext] ♻️ Reusing existing ${kind} transceiver (mid=${t.mid})`);
           
+          // CRITICAL: Wait for replaceTrack to complete AND set direction BEFORE creating offer
           await t.sender.replaceTrack(track);
           t.direction = 'sendrecv';
           
-          // CLEANUP: Stop any EXTRA transceivers (The Fix Copilot Missed)
+          // CLEANUP: Stop any EXTRA transceivers
           for (let i = 1; i < available.length; i++) {
              const extra = available[i];
              if (extra.direction !== 'stopped') {
                 console.log(`[WebRTCContext] 🛑 Stopping duplicate ${kind} transceiver (mid=${extra.mid})`);
-                extra.stop(); // <--- THIS is what removes the ghost m-line
+                extra.stop();
              }
           }
         } else {
