@@ -39,7 +39,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
   const haveNothingStreakRef = useRef(0); // consecutive HAVE_NOTHING frames
   const lastReattachRef = useRef(0); // throttle forced reattach attempts
 
-  const [currentMode, setCurrentMode] = useState<MonitoringMode>("patient_monitoring");
+  const [currentMode, setCurrentMode] = useState<MonitoringMode>("idle");
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [patientMotionFrameCount, setPatientMotionFrameCount] = useState(0);
@@ -169,8 +169,9 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     draw: drawPerimeter,
     checkCrossing: checkPerimeterCrossing,
   } = usePerimeter(canvasRef, currentMode);
+  // Only activate sound detection when in patient_monitoring mode AND we have a remote stream
   useSoundDetection(
-    currentMode === "patient_monitoring" && !!remoteStream,
+    currentMode === "patient_monitoring" && !!remoteStream && remoteStream.getAudioTracks().length > 0,
     triggerAlert,
     triggerAlert,
     initAudio,
@@ -998,10 +999,17 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pairingRoomId]);
+  // Auto-switch to patient_monitoring when remoteStream becomes available
+  useEffect(() => {
+    if (remoteStream && currentMode === 'idle') {
+      setMode('patient_monitoring');
+    }
+  }, [remoteStream, currentMode]);
+
   const getStatusText = () => {
     switch (currentMode) {
       case "idle":
-        return "Status: Idle";
+        return remoteStream ? "Status: Connected" : "Status: Waiting for Dependent";
       case "perimeter_setup":
         return "Status: Camera Active. Click to draw perimeter.";
       case "perimeter_monitoring":
@@ -1092,7 +1100,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           <video
             ref={videoRef}
             className="absolute top-0 left-0 w-full h-full object-cover"
-            style={{ transform: "scaleX(-1)", zIndex: 5 }} // Flip video element for intuitive view
+            style={{ transform: "scaleX(-1)" }} // Flip video element for intuitive view
             playsInline
             autoPlay
             muted
@@ -1103,7 +1111,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           <canvas
             ref={canvasRef}
             className="absolute top-0 left-0 w-full h-full cursor-crosshair"
-            style={{ zIndex: currentMode === 'perimeter_setup' || currentMode === 'perimeter_monitoring' ? 10 : -1, pointerEvents: currentMode === 'perimeter_setup' ? 'auto' : 'none' }}
+            style={{ display: currentMode === 'perimeter_setup' || currentMode === 'perimeter_monitoring' ? 'block' : 'none', zIndex: 10, pointerEvents: currentMode === 'perimeter_setup' ? 'auto' : 'none' }}
             onClick={handleCanvasClick}
           ></canvas>
           {!remoteStream && (
