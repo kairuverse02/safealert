@@ -247,13 +247,13 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         if (available && available.length > 0) {
           // REUSE: Pick the first available transceiver
           const t = available[0];
-          console.log(`[WebRTCContext] ♻️ Reusing existing ${kind} transceiver (mid=${t.mid}) - BEFORE: direction=${t.direction}, stopped=${t.stopped}, hasTrack=${!!t.sender.track}`);
+          console.log(`[WebRTCContext] ♻️ Reusing existing ${kind} transceiver (mid=${t.mid}) - BEFORE: direction=${t.direction}, currentDirection=${t.currentDirection}, hasTrack=${!!t.sender.track}`);
           
           // CRITICAL: Wait for replaceTrack to complete AND set direction BEFORE creating offer
           await t.sender.replaceTrack(track);
           t.direction = 'sendrecv';
           
-          console.log(`[WebRTCContext] ♻️ Reusing existing ${kind} transceiver (mid=${t.mid}) - AFTER: direction=${t.direction}, stopped=${t.stopped}, hasTrack=${!!t.sender.track}`);
+          console.log(`[WebRTCContext] ♻️ Reusing existing ${kind} transceiver (mid=${t.mid}) - AFTER: direction=${t.direction}, currentDirection=${t.currentDirection}, hasTrack=${!!t.sender.track}`);
           
           // CLEANUP: Stop any EXTRA transceivers
           for (let i = 1; i < available.length; i++) {
