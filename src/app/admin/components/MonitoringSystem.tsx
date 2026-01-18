@@ -39,7 +39,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
   const haveNothingStreakRef = useRef(0); // consecutive HAVE_NOTHING frames
   const lastReattachRef = useRef(0); // throttle forced reattach attempts
 
-  const [currentMode, setCurrentMode] = useState<MonitoringMode>("idle");
+  const [currentMode, setCurrentMode] = useState<MonitoringMode>("patient_monitoring");
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [patientMotionFrameCount, setPatientMotionFrameCount] = useState(0);
@@ -156,10 +156,12 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     [initAudio, playSound, pairingRoomId]
   );
 
-  const { startCamera, stopCamera, isCameraActive } = useCamera(
-    videoRef,
-    triggerAlert
-  );
+  // Guardian doesn't use local camera - only monitors dependent's remote stream
+  // const { startCamera, stopCamera, isCameraActive } = useCamera(
+  //   videoRef,
+  //   triggerAlert
+  // );
+  const isCameraActive = false; // Guardian never uses local camera
   const {
     points: perimeterPoints,
     addPoint: addPerimeterPoint,
@@ -405,7 +407,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
 
   // --- Animation Loop Control ---
   useEffect(() => {
-    const shouldRun = (isCameraActive || !!remoteStream);
+    const shouldRun = !!remoteStream; // Only run when we have dependent's remote stream
     if (shouldRun && !animationFrameIdRef.current) {
       animationFrameIdRef.current = requestAnimationFrame(animationLoop);
     } else if (!shouldRun && animationFrameIdRef.current) {
@@ -418,21 +420,21 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
         animationFrameIdRef.current = null;
       }
     };
-  }, [isCameraActive, animationLoop, remoteStream]);
+  }, [animationLoop, remoteStream]);
 
-  // Auto-calibrate when entering patient monitoring or when camera starts in patient mode
+  // Auto-calibrate when entering patient monitoring and remote stream is available
   useEffect(() => {
     try {
       if (currentMode === 'patient_monitoring') {
         // reset calibrated flag when switching into patient mode
         calibratedRef.current = false;
       }
-      if (currentMode === 'patient_monitoring' && isCameraActive && !calibratedRef.current) {
+      if (currentMode === 'patient_monitoring' && remoteStream && !calibratedRef.current) {
         handleCalibrateMotion();
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentMode, isCameraActive]);
+  }, [currentMode, remoteStream]);
 
   // Attach remote stream to the video element when provided and ensure playback starts
   useEffect(() => {
@@ -574,17 +576,18 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     };
   }, [remoteStream, forceReattachRemoteVideo]);
 
-  const handleStartStopCamera = async () => {
-    if (isCameraActive) {
-      stopCamera();
-      setMode("idle");
-    } else {
-      const success = await startCamera();
-      if (success) {
-        setMode("perimeter_setup");
-      }
-    }
-  };
+  // Guardian doesn't use local camera
+  // const handleStartStopCamera = async () => {
+  //   if (isCameraActive) {
+  //     stopCamera();
+  //     setMode("idle");
+  //   } else {
+  //     const success = await startCamera();
+  //     if (success) {
+  //       setMode("perimeter_setup");
+  //     }
+  //   }
+  // };
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (currentModeRef.current !== "perimeter_setup") return;
@@ -603,19 +606,21 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
 
   const handleSetPerimeter = () => setMode("perimeter_monitoring");
   const handleClearPerimeter = () => clearPerimeterPoints();
-  const handlePatientModeToggle = () =>
+  const handlePatientModeToggle = () => {
+    if (!remoteStream) return; // Can't toggle without dependent's stream
     setMode(
       currentModeRef.current === "patient_monitoring"
         ? "perimeter_setup"
         : "patient_monitoring"
     );
+  };
 
   // Motion calibration: samples frames to estimate ambient pixel noise and set thresholds automatically
   const handleCalibrateMotion = async () => {
-    // Allow calibration with either local camera (isCameraActive) OR the dependent's remote stream
-    if (!isCameraActive && !remoteStream) {
+    // Only calibrate with dependent's remote stream
+    if (!remoteStream) {
       setLogEntries((prev) => [
-        { id: Date.now() + Math.random(), type: "info", message: "Start the camera before calibrating motion.", time: new Date().toLocaleTimeString() },
+        { id: Date.now() + Math.random(), type: "info", message: "Wait for dependent camera feed before calibrating motion.", time: new Date().toLocaleTimeString() },
         ...prev.slice(0, 19),
       ]);
       return;
@@ -630,10 +635,10 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
       ...prev.slice(0, 19),
     ]);
 
-    // Choose the video source: prefer attached videoRef (local or remote). If not available, create a hidden video element for remoteStream
+    // Choose the video source: use videoRef which should have the dependent's remote stream
     let video: HTMLVideoElement | null = null;
     try {
-      if (videoRef.current && (isCameraActive || videoRef.current.srcObject)) {
+      if (videoRef.current && videoRef.current.srcObject) {
         video = videoRef.current;
       } else if (remoteStream) {
         // create an offscreen video element bound to remote stream to ensure we can sample frames
@@ -1101,10 +1106,10 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
             style={{ zIndex: currentMode === 'perimeter_setup' || currentMode === 'perimeter_monitoring' ? 10 : -1, pointerEvents: currentMode === 'perimeter_setup' ? 'auto' : 'none' }}
             onClick={handleCanvasClick}
           ></canvas>
-          {!(isCameraActive || !!remoteStream) && (
+          {!remoteStream && (
             <div className="absolute inset-0 bg-black bg-opacity-70 text-white flex flex-col items-center justify-center text-center p-4 rounded-tl-md rounded-bl-md">
-              <h2 className="text-2xl font-semibold mb-2">Welcome!</h2>
-              <p>Start your camera or wait for the dependent to connect their feed.</p>
+              <h2 className="text-2xl font-semibold mb-2">Waiting for Dependent...</h2>
+              <p>The dependent needs to connect and share their camera feed.</p>
             </div>
           )}
           {remoteStream && cameraStatus === 'off' && (
@@ -1141,25 +1146,16 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
 
         {/* Controls Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {pairingRoomId ? (
-            <button
-              disabled
-              className="bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-all w-full cursor-not-allowed"
-              title="Monitoring paired dependent camera"
-            >
-              Remote Feed
-            </button>
-          ) : (
-            <button
-              onClick={handleStartStopCamera}
-              className="bg-[#E7473C] hover:bg-red-500 text-white font-bold py-2 px-4 rounded-lg transition-all w-full"
-            >
-              {isCameraActive ? "Stop Camera" : "Start Camera"}
-            </button>
-          )}
+          <button
+            disabled
+            className="bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-all w-full cursor-not-allowed"
+            title="Guardian monitors dependent camera only"
+          >
+            {remoteStream ? "Monitoring Dependent" : "Waiting for Dependent..."}
+          </button>
           <button
             onClick={handlePatientModeToggle}
-            disabled={!(isCameraActive || !!remoteStream)}
+            disabled={!remoteStream}
             className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed ${
               currentMode === "patient_monitoring"
                 ? "bg-green-500 hover:bg-green-600 animate-pulse"
@@ -1172,7 +1168,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           </button>
           <button
             onClick={handleCalibrateMotion}
-            disabled={!(isCameraActive || !!remoteStream)}
+            disabled={!remoteStream}
             className="bg-yellow-600 hover:bg-yellow-700 text-black font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed"
           >
             Recalibrate Motion
@@ -1207,7 +1203,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           </button>
           <button
             onClick={() => setIsMuted((prev) => !prev)}
-            disabled={!(isCameraActive || !!remoteStream)}
+            disabled={!remoteStream}
             className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 ${
               isMuted
                 ? "bg-red-600 hover:bg-red-700"
