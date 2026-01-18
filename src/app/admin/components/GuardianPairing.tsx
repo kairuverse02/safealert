@@ -151,48 +151,12 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
     applyingAnswerRef.current = false;
     hasStartedPollingRef.current = false;
 
-    // CRITICAL FIX: Acquire REAL camera before creating Peer so initial offer has valid m-lines
-    // If camera permission denied, fall back to dummy stream
-    let localStream: MediaStream | undefined;
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      localStream = s;
-      streamRef.current = s;
-      setLocalCameraActive(true);
-      setLocalCameraError(null);
-      if (localVideoRef.current) localVideoRef.current.srcObject = s;
-      console.log('Guardian: Acquired REAL camera for initial offer');
-    } catch (err) {
-      console.warn('Guardian: Failed to acquire camera, falling back to dummy stream', err);
-      setLocalCameraError(String((err as Error)?.message || String(err)));
-      
-      // Fallback: Use dummy stream if camera permission denied
-      try {
-        const audioCtx = new AudioContext();
-        const dummyAudioTrack = audioCtx.createMediaStreamDestination().stream.getTracks()[0];
-        
-        // Create a silent video track using canvas
-        const canvas = document.createElement('canvas');
-        canvas.width = 1;
-        canvas.height = 1;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#000000';
-          ctx.fillRect(0, 0, 1, 1);
-        }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const dummyVideoTrack = (canvas as any).captureStream(30).getVideoTracks()[0];
-        
-        localStream = new MediaStream();
-        if (dummyAudioTrack) localStream.addTrack(dummyAudioTrack);
-        if (dummyVideoTrack) localStream.addTrack(dummyVideoTrack);
-        console.log('Guardian: Created DUMMY media stream as fallback');
-        streamRef.current = null;
-      } catch (dummyErr) {
-        console.error('Guardian: Failed to create even dummy stream', dummyErr);
-        localStream = undefined;
-      }
-    }
+    // CRITICAL FIX: Do NOT acquire camera for Guardian - Guardian should ONLY receive
+    // If we send tracks in the initial offer, they'll be part of the negotiation and cause port 9 issues
+    const localStream: MediaStream | undefined = undefined;
+    console.log('Guardian: NOT acquiring camera - Guardian is receive-only');
+    streamRef.current = null;
+    setLocalCameraActive(false);
     
     // clear any previous room creation error
     setErrorMsg(null);
