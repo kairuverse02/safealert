@@ -221,33 +221,42 @@ export function WebRTCProvider({ children }: WebRTCProviderProps) {
         }
       }
       
-      // Stop all existing transceivers and create fresh ones
-      // This avoids the "inactive" transceiver issue where old transceivers can't be reactivated
-      // This avoids the "inactive" transceiver issue where old transceivers can't be reactivated
+      // Replace tracks on existing transceivers to maintain m-line stability
       const existingTransceivers = pc.getTransceivers();
-      console.log(`[WebRTCContext] Stopping ${existingTransceivers.length} existing transceivers before adding new tracks`);
+      const streamTracks = stream.getTracks();
+      
+      console.log(`[WebRTCContext] Found ${existingTransceivers.length} existing transceivers, ${streamTracks.length} tracks to add`);
+      
+      // Group transceivers by kind
+      const transceiversByKind: Record<string, RTCRtpTransceiver[]> = { audio: [], video: [] };
       for (const t of existingTransceivers) {
-        try {
-          t.stop();
-          console.log(`[WebRTCContext] Stopped transceiver mid=${t.mid}`);
-        } catch (e) {
-          console.warn(`[WebRTCContext] Failed to stop transceiver mid=${t.mid}`, e);
+        const kind = t.receiver?.track?.kind || t.sender?.track?.kind;
+        if (kind === 'audio' || kind === 'video') {
+          transceiversByKind[kind].push(t);
         }
       }
       
-      // 3. Add fresh transceivers with tracks
-      const streamTracks = stream.getTracks();
+      // Replace tracks on existing transceivers
       for (const track of streamTracks) {
-        const kind = track.kind as 'video' | 'audio';
-        console.log(`[WebRTCContext] ➕ Adding fresh ${kind} transceiver with track`);
-        const newT = pc.addTransceiver(track, {
-          direction: 'sendrecv',
-          sendEncodings: kind === 'video' ? [{ maxBitrate: 2500000 }] : undefined
-        });
-        console.log(`[WebRTCContext] ✅ Added ${kind} transceiver: mid=${newT.mid}, direction=${newT.direction}, hasTrack=${!!newT.sender.track}`);
+        const kind = track.kind as 'audio' | 'video';
+        const available = transceiversByKind[kind];
+        
+        if (available && available.length > 0) {
+          const t = available[0];
+          console.log(`[WebRTCContext] Replacing ${kind} track on transceiver mid=${t.mid}`);
+          await t.sender.replaceTrack(track);
+          t.direction = 'sendrecv';
+          console.log(`[WebRTCContext] ✅ Replaced ${kind} track: mid=${t.mid}, direction=${t.direction}`);
+          transceiversByKind[kind].shift();
+        } else {
+          console.log(`[WebRTCContext] ➕ Creating new ${kind} transceiver`);
+          const newT = pc.addTransceiver(track, {
+            direction: 'sendrecv',
+            sendEncodings: kind === 'video' ? [{ maxBitrate: 2500000 }] : undefined
+          });
+          console.log(`[WebRTCContext] ✅ Created ${kind} transceiver: mid=${newT.mid}`);
+        }
       }
-
-      
       // Create renegotiation offer
       console.log('[WebRTCContext] Creating renegotiation offer...');
       
