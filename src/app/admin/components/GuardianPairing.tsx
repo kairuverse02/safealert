@@ -1079,8 +1079,9 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
     });
 
     peer.on("close", () => {
-      console.log("Peer closed");
-      cleanup();
+      console.log("Peer closed - ignoring (data channel closure)");
+      // DO NOT call cleanup() - this is just the data channel closing
+      // The connection is still active via the underlying RTCPeerConnection
     });
   };
 
