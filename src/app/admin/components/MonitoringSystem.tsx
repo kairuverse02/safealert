@@ -39,6 +39,29 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
   const haveNothingStreakRef = useRef(0); // consecutive HAVE_NOTHING frames
   const lastReattachRef = useRef(0); // throttle forced reattach attempts
 
+  // Track if we have a valid video feed (not just remoteStream)
+  const [hasVideoFeed, setHasVideoFeed] = useState(false);
+
+  // Check if we have a valid video feed
+  useEffect(() => {
+    if (remoteStream && videoRef.current) {
+      const checkVideoFeed = () => {
+        const video = videoRef.current;
+        if (video && video.readyState >= video.HAVE_METADATA && video.videoWidth > 0 && video.videoHeight > 0) {
+          setHasVideoFeed(true);
+        } else {
+          setHasVideoFeed(false);
+        }
+      };
+      
+      checkVideoFeed();
+      const interval = setInterval(checkVideoFeed, 500);
+      return () => clearInterval(interval);
+    } else {
+      setHasVideoFeed(false);
+    }
+  }, [remoteStream]);
+
   const [currentMode, setCurrentMode] = useState<MonitoringMode>("idle");
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [isMuted, setIsMuted] = useState(false);
@@ -999,12 +1022,12 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pairingRoomId]);
-  // Auto-switch to patient_monitoring when remoteStream becomes available
+  // Auto-switch to patient_monitoring when video feed becomes available
   useEffect(() => {
-    if (remoteStream && currentMode === 'idle') {
+    if (hasVideoFeed && currentMode === 'idle') {
       setMode('patient_monitoring');
     }
-  }, [remoteStream, currentMode]);
+  }, [hasVideoFeed, currentMode]);
 
   const getStatusText = () => {
     switch (currentMode) {
@@ -1163,7 +1186,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           </button>
           <button
             onClick={handlePatientModeToggle}
-            disabled={!remoteStream}
+            disabled={!hasVideoFeed}
             className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed ${
               currentMode === "patient_monitoring"
                 ? "bg-green-500 hover:bg-green-600 animate-pulse"
@@ -1176,7 +1199,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           </button>
           <button
             onClick={handleCalibrateMotion}
-            disabled={!remoteStream}
+            disabled={!hasVideoFeed}
             className="bg-yellow-600 hover:bg-yellow-700 text-black font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed"
           >
             Recalibrate Motion
@@ -1185,7 +1208,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           <button
             onClick={handleSetPerimeter}
             disabled={
-              currentMode !== "perimeter_setup" || perimeterPoints.length < 3
+              !hasVideoFeed || currentMode !== "perimeter_setup" || perimeterPoints.length < 3
             }
             className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed"
           >
@@ -1194,7 +1217,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           <button
             onClick={handleClearPerimeter}
             disabled={
-              !["perimeter_setup", "perimeter_monitoring"].includes(currentMode) ||
+              !hasVideoFeed || !["perimeter_setup", "perimeter_monitoring"].includes(currentMode) ||
               perimeterPoints.length === 0
             }
             className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed"
@@ -1211,7 +1234,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           </button>
           <button
             onClick={() => setIsMuted((prev) => !prev)}
-            disabled={!remoteStream}
+            disabled={!hasVideoFeed}
             className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 ${
               isMuted
                 ? "bg-red-600 hover:bg-red-700"
