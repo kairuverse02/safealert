@@ -807,6 +807,13 @@ export default function GuardianPairing({ onRoomCreated, onPairingComplete }: Pr
                 setRemoteStreamState(currentRemoteStream);
                 setTimeout(() => setShowMonitoring(true), 150);
 
+                // AUTOMATICALLY send start_monitor command when video is received
+                // This redirects the dependent to their dashboard immediately
+                if (videoTracks > 0 && !isMonitoring && roomId) {
+                  console.log('[Guardian] Video received, automatically sending start_monitor command');
+                  setTimeout(() => sendMonitoringRequest(true), 500);
+                }
+
                 // Mark audio received if we have audio tracks (for mic test diagnostics)
                 if (audioTracks > 0) {
                   setMicTestAudioReceived(true);
