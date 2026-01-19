@@ -297,14 +297,6 @@ export default function Navbar({
                   <span>Switch to Guardian</span>
                 </button>
 
-                <Link href="/client/account"
-                  onClick={() => setIsDropdownOpen(false)}
-                  role="menuitem"
-                  className="w-full flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-                >
-                  <Settings size={18} className="mr-3 text-gray-500" />
-                  <span>Account Settings</span>
-                </Link>
                 <Link href="/client/privacy"
                   onClick={() => setIsDropdownOpen(false)}
                   role="menuitem"

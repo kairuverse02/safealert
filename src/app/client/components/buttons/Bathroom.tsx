@@ -141,14 +141,6 @@ const Bathroom = () => {
         >
           {isOnCooldown ? `I Need Bathroom ${cooldownTime}s` : (paired ? 'I Need Bathroom' : 'Not paired')}
         </Button>
-
-        <Button
-          onClick={triggerMicTest}
-          disabled={!paired}
-          className='bg-[#f97316] hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-lg transition-all disabled:bg-gray-600 disabled:cursor-not-allowed cursor-pointer'
-        >
-          Test Mic
-        </Button>
       </div>
 
       {!paired && (

@@ -27,8 +27,7 @@ export default function Home() {
         style={{
           backgroundImage: 'url(/assets/HeroBG.jpg)',
           backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundAttachment: 'fixed'
+          backgroundPosition: 'center'
         }}
       >
       <div className="mx-8 max-w-5xl">
