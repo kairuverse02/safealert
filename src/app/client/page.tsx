@@ -17,6 +17,7 @@ export default function Home(){
   return (
     <>
     <div>
+      {/* DeletedQRSCANNER */}
       {pairWithId ? (
         <PatientScanner initialRoomId={pairWithId} />
       ) : (
