@@ -1112,12 +1112,12 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
   return (
     <>
       {/* Main container */}
-      <div className="w-full mx-auto max-w-6xl bg-[#F0F0F0] rounded-xl shadow-2xl border-2 border-solid border-black p-6 my-4 space-y-4">
-        <div className="flex justify-between items-center">
-          <h1 className="text-center font-xl font-semibold flex-1">{getStatusText()}</h1>
+      <div className="w-full mx-auto max-w-6xl bg-[#F0F0F0] rounded-xl shadow-2xl border-2 border-solid border-black p-3 sm:p-6 my-4 space-y-3 sm:space-y-4">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+          <h1 className="text-lg sm:text-xl font-semibold text-center sm:text-left flex-1">{getStatusText()}</h1>
           {remoteStream && (
-            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 text-white">
-              <span className="text-sm font-medium">Camera:</span>
+            <div className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg bg-gray-800 text-white text-sm sm:text-base">
+              <span className="font-medium">Camera:</span>
               {cameraStatus === 'active' && <span className="text-green-400 font-bold">● Active</span>}
               {cameraStatus === 'off' && <span className="text-yellow-400 font-bold">● Off</span>}
               {cameraStatus === 'not-found' && <span className="text-red-400 font-bold">● Not Found</span>}
@@ -1127,9 +1127,9 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
         </div>
 
         {/* Video and Log Grid Container*/}
-        <div className="grid grid-cols-3">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
         {/* Video/Canvas Area */}
-        <div className="relative w-full rounded-tl-md rounded-bl-md bg-gray-900 overflow-hidden flex items-center justify-center col-span-2">
+        <div className="relative w-full rounded-lg lg:rounded-l-lg bg-gray-900 overflow-hidden flex items-center justify-center lg:col-span-2 min-h-64 sm:min-h-80 lg:min-h-96">
           <video
             ref={videoRef}
             className="absolute top-0 left-0 w-full h-full object-contain"
@@ -1148,34 +1148,34 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
             onClick={handleCanvasClick}
           ></canvas>
           {!remoteStream && (
-            <div className="absolute inset-0 bg-black bg-opacity-70 text-white flex flex-col items-center justify-center text-center p-4 rounded-tl-md rounded-bl-md">
-              <h2 className="text-2xl font-semibold mb-2">Waiting for Dependent...</h2>
-              <p>The dependent needs to connect and share their camera feed.</p>
+            <div className="absolute inset-0 bg-black bg-opacity-70 text-white flex flex-col items-center justify-center text-center p-3 sm:p-4 rounded-lg lg:rounded-l-lg">
+              <h2 className="text-lg sm:text-2xl font-semibold mb-2">Waiting for Dependent...</h2>
+              <p className="text-sm sm:text-base">The dependent needs to connect and share their camera feed.</p>
             </div>
           )}
           {remoteStream && cameraStatus === 'off' && (
-            <div className="absolute inset-0 bg-black bg-opacity-80 text-yellow-400 flex flex-col items-center justify-center text-center p-4 rounded-tl-md rounded-bl-md z-20">
-              <svg className="w-16 h-16 mb-4" fill="currentColor" viewBox="0 0 20 20">
+            <div className="absolute inset-0 bg-black bg-opacity-80 text-yellow-400 flex flex-col items-center justify-center text-center p-3 sm:p-4 rounded-lg lg:rounded-l-lg z-20">
+              <svg className="w-12 sm:w-16 h-12 sm:h-16 mb-4" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 3a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1zm0 4a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clipRule="evenodd" />
               </svg>
-              <h2 className="text-2xl font-semibold mb-2">Dependent Camera Off</h2>
-              <p className="text-sm">The dependent has their camera disabled or turned off.</p>
+              <h2 className="text-lg sm:text-2xl font-semibold mb-2">Dependent Camera Off</h2>
+              <p className="text-xs sm:text-sm">The dependent has their camera disabled or turned off.</p>
             </div>
           )}
           {remoteStream && cameraStatus === 'not-found' && (
-            <div className="absolute inset-0 bg-black bg-opacity-80 text-red-400 flex flex-col items-center justify-center text-center p-4 rounded-tl-md rounded-bl-md z-20">
-              <svg className="w-16 h-16 mb-4" fill="currentColor" viewBox="0 0 20 20">
+            <div className="absolute inset-0 bg-black bg-opacity-80 text-red-400 flex flex-col items-center justify-center text-center p-3 sm:p-4 rounded-lg lg:rounded-l-lg z-20">
+              <svg className="w-12 sm:w-16 h-12 sm:h-16 mb-4" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M13.477 14.89A6 6 0 015.11 6.524l8.367 8.368zm1.414-1.414L6.524 5.11a6 6 0 018.367 8.367zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" clipRule="evenodd" />
               </svg>
-              <h2 className="text-2xl font-semibold mb-2">Camera Not Found</h2>
-              <p className="text-sm">Unable to detect the dependent camera feed.</p>
+              <h2 className="text-lg sm:text-2xl font-semibold mb-2">Camera Not Found</h2>
+              <p className="text-xs sm:text-sm">Unable to detect the dependent camera feed.</p>
             </div>
           )}
         </div>
         {/* Event Log */}
-        <div className="bg-[#F0F0F0] border-2 border-solid border-black px-4 rounded-tr-md rounded-br-md h-100 overflow-y-auto">
-          <h3 className="font-semibold text-lg text-black text-center p-2 sticky top-0 bg-[#F0F0F0]">Event Log</h3>
-          <div className="space-y-1 text-sm">
+        <div className="bg-[#F0F0F0] border-2 border-solid border-black px-3 sm:px-4 rounded-lg lg:rounded-r-lg min-h-64 sm:min-h-80 lg:min-h-96 overflow-y-auto">
+          <h3 className="font-semibold text-base sm:text-lg text-black text-center p-2 sticky top-0 bg-[#F0F0F0]">Event Log</h3>
+          <div className="space-y-1 text-xs sm:text-sm">
             {logEntries.length > 0 ? (
               logEntries.map(getLogEntryUI)
             ) : (
@@ -1186,33 +1186,33 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
         </div>
 
         {/* Controls Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
           <button
             disabled
-            className="bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-all w-full cursor-not-allowed"
+            className="bg-gray-500 text-white font-bold py-2 px-2 sm:px-4 rounded-lg transition-all w-full cursor-not-allowed text-xs sm:text-sm"
             title="Guardian monitors dependent camera only"
           >
-            {remoteStream ? "Monitoring Dependent" : "Waiting for Dependent..."}
+            {remoteStream ? "Monitoring" : "Waiting..."}
           </button>
           <button
             onClick={handlePatientModeToggle}
             disabled={!hasVideoFeed}
-            className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed ${
+            className={`text-white font-bold py-2 px-2 sm:px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed text-xs sm:text-sm ${
               currentMode === "patient_monitoring"
                 ? "bg-green-500 hover:bg-green-600 animate-pulse"
                 : "bg-indigo-600 hover:bg-indigo-700"
             }`}
           >
             {currentMode === "patient_monitoring"
-              ? "Patient Mode ON"
-              : "Patient Mode"}
+              ? "Patient ON"
+              : "Patient"}
           </button>
           <button
             onClick={handleCalibrateMotion}
             disabled={!hasVideoFeed}
-            className="bg-yellow-600 hover:bg-yellow-700 text-black font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed"
+            className="bg-yellow-600 hover:bg-yellow-700 text-black font-bold py-2 px-2 sm:px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed text-xs sm:text-sm"
           >
-            Recalibrate Motion
+            Recalibrate
           </button>
 
           <button
@@ -1220,7 +1220,7 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
             disabled={
               !hasVideoFeed || currentMode !== "perimeter_setup" || perimeterPoints.length < 3
             }
-            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed"
+            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-2 sm:px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed text-xs sm:text-sm"
           >
             Set Perimeter
           </button>
@@ -1230,22 +1230,22 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
               !hasVideoFeed || !["perimeter_setup", "perimeter_monitoring"].includes(currentMode) ||
               perimeterPoints.length === 0
             }
-            className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed"
+            className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-2 sm:px-4 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed text-xs sm:text-sm"
           >
-            Clear Perimeter
+            Clear
           </button>
           <button
             onClick={() => onToggleMonitoring ? onToggleMonitoring(!isMonitoring) : undefined}
             disabled={!onToggleMonitoring || !pairingRoomId}
-            className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full ${isMonitoring ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} ${(!onToggleMonitoring || !pairingRoomId) ? 'opacity-60 cursor-not-allowed' : ''}`}
+            className={`text-white font-bold py-2 px-2 sm:px-4 rounded-lg transition-all w-full text-xs sm:text-sm ${isMonitoring ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} ${(!onToggleMonitoring || !pairingRoomId) ? 'opacity-60 cursor-not-allowed' : ''}`}
             title={isMonitoring ? 'Stop Monitoring' : 'Start Monitoring'}
           >
-            {isMonitoring ? 'Stop Monitoring' : 'Start Monitoring'}
+            {isMonitoring ? 'Stop' : 'Start'}
           </button>
           <button
             onClick={() => setIsMuted((prev) => !prev)}
             disabled={!hasVideoFeed}
-            className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full disabled:bg-gray-600 ${
+            className={`text-white font-bold py-2 px-2 sm:px-4 rounded-lg transition-all w-full disabled:bg-gray-600 text-xs sm:text-sm ${
               isMuted
                 ? "bg-red-600 hover:bg-red-700"
                 : "bg-purple-600 hover:bg-purple-700"
@@ -1255,15 +1255,15 @@ export default function MonitoringSystem({ pairingRoomId, remoteStream, isMonito
           </button>
           <button
             onClick={handleEnableAudio}
-            className={`text-white font-bold py-2 px-4 rounded-lg transition-all w-full bg-gray-700 hover:bg-gray-800`}
+            className={`text-white font-bold py-2 px-2 sm:px-4 rounded-lg transition-all w-full bg-gray-700 hover:bg-gray-800 text-xs sm:text-sm`}
           >
-            Enable Audio
+            Audio
           </button>
           {/* Export PDF Button */}
           <button
             onClick={handleExportPDF}
             disabled={logEntries.length === 0}
-            className="sm:col-span-2 mt-4 sm:mt-0 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed"
+            className="col-span-2 sm:col-span-3 lg:col-span-4 mt-2 sm:mt-0 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 sm:py-3 px-3 sm:px-6 rounded-lg transition-all w-full disabled:bg-gray-600 disabled:cursor-not-allowed text-xs sm:text-sm"
           >
             Export Event Log
           </button>

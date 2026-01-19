@@ -22,10 +22,10 @@ const SQRbutton: React.FC = () => {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center justify-center gap-4 h-20 w-64 rounded-xl bg-[#E7473C] cursor-pointer hover:bg-[#D9271B] text-white font-bold px-4 mt-12">
-        <div className='flex items-center gap-2'>
-        <ScanQrCode size={48}/>
-        <span className="text-3xl font-bold flex-end">CONNECT</span>
+        className="flex items-center justify-center gap-2 sm:gap-3 md:gap-4 h-16 sm:h-20 md:h-24 w-48 sm:w-64 md:w-80 rounded-lg sm:rounded-xl bg-[#E7473C] cursor-pointer hover:bg-[#D9271B] text-white font-bold px-3 sm:px-4 transition-all duration-200 hover:shadow-lg">
+        <div className='flex items-center gap-2 sm:gap-2 md:gap-3'>
+        <ScanQrCode size={32} className="sm:w-10 sm:h-10 md:w-12 md:h-12"/>
+        <span className="text-lg sm:text-2xl md:text-3xl font-bold">CONNECT</span>
         </div>
       </button>
       <QrScannerModal open={open} onClose={() => setOpen(false)} />

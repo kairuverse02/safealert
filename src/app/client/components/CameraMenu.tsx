@@ -69,45 +69,45 @@ export default function CameraMenu() {
   };
 
   return (
-    <div className='h-[440px] text-white flex flex-col items-center justify-center '>
-      <div className='h-92 w-full relative rounded'>
+    <div className='w-full flex flex-col items-center justify-center gap-2'>
+      <div className='w-full aspect-video relative rounded overflow-hidden bg-black'>
         <video 
           ref={videoRef} 
           autoPlay 
           muted 
-          className="rounded-md w-full h-full bg-black object-cover absolute border-solid border-black" 
+          className="w-full h-full bg-black object-cover absolute border-solid border-black" 
         />   
-        <h1 className="absolute left-2 text-white text-shadow-lg">
+        <h1 className="absolute left-2 top-2 text-white text-sm sm:text-base text-shadow-lg">
           Your Camera
         </h1>
       </div>
-      <div className='w-full flex justify-center gap-2 mt-4 mx-auto rounded-full'>
+      <div className='w-full flex justify-center gap-2 mx-auto rounded-full'>
         <button onClick={handleToggleCam} className={`
-    px-4 py-2 rounded-full flex items-center gap-2 mb-4
+    px-3 sm:px-4 py-2 rounded-full flex items-center gap-2 transition-colors
     ${camOn ? 'bg-neutral-800 hover:bg-green-700' : 'bg-[#E7473C] hover:bg-red-700'}
   `}
 >
           {camOn ? (
         <>
-        <Video size={25} />
+        <Video size={20} className="sm:w-6 sm:h-6" />
         </>
       ) : (
         <>
-          <VideoOff size={25} />
+          <VideoOff size={20} className="sm:w-6 sm:h-6" />
         </>
       )}
         </button>
         <button onClick={handleToggleMic} className={`
-    px-4 rounded-full flex items-center gap-2 mb-4
+    px-3 sm:px-4 py-2 rounded-full flex items-center gap-2 transition-colors
     ${micOn ? 'bg-neutral-800 hover:bg-green-700' : 'bg-[#E7473C] hover:bg-red-700'}
   `}>
           {micOn ? (
         <>
-          <Mic size={25} />
+          <Mic size={20} className="sm:w-6 sm:h-6" />
         </>
       ) : (
         <>
-          <MicOff size={25}/>
+          <MicOff size={20} className="sm:w-6 sm:h-6" />
         </>
       )}
         </button>

@@ -116,13 +116,13 @@ const SOSButton = () => {
         onClick={handleSOSClick}
         disabled={showModal}
         className={cn(
-          'h-[330px] w-[330px] font-display font-semibold text-8xl rounded-full text-white transition-all duration-300',
+          'h-40 w-40 sm:h-56 sm:w-56 md:h-80 md:w-80 lg:h-[330px] lg:w-[330px] font-display font-semibold text-4xl sm:text-6xl md:text-7xl lg:text-8xl rounded-full text-white transition-all duration-300',
           'transform hover:scale-103 active:scale-95',
           'shadow-2xl hover:shadow-3xl',
-          'border-b-15 active:border-b-2',
+          'border-b-4 sm:border-b-8 md:border-b-12 lg:border-b-15 active:border-b-2',
           isActivated ? [
             'bg-red-500 hover:bg-red-500',
-            'shadow-[0_0_50px_rgba(239,68,68,0.7)]',
+            'shadow-[0_0_30px_sm:shadow-[0_0_40px_md:shadow-[0_0_50px_rgba(239,68,68,0.7)]',
             'animate-[pulse_2s_ease-in-out_infinite]',
             'border-red-700'
           ] : [
@@ -139,9 +139,9 @@ const SOSButton = () => {
 
       {/* Confirmation Modal */}
       {showModal && !modalExpired && (
-        <div className="fixed inset-0 bg-white/50 backdrop-blur-md flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-white/50 backdrop-blur-md flex items-center justify-center z-50 p-4">
           <div className={cn(
-            'bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 transition-all duration-300',
+            'bg-white rounded-2xl shadow-2xl p-4 sm:p-6 md:p-8 max-w-md w-full transition-all duration-300',
             notified ? 'scale-100' : 'scale-95'
           )}>
             {!notified ? (
