@@ -41,7 +41,7 @@ export function LoginForm() {
       <CardHeader>
         <CardTitle className="text-2xl font-bold text-[#E7473C]">Login</CardTitle>
         <CardDescription>
-          Enter your email below to login to your account
+          Enter your credentials below to login to your account.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -88,22 +88,26 @@ export function LoginForm() {
               {error && <div className="text-red-500 text-sm">{error}</div>}
 
               <Button type="submit" 
-              className="w-full bg-[#E7473C] hover:bg-[#D9271B] cursor-pointer"
+              className="w-full bg-[#E7473C] hover:bg-[#D9271B] cursor-pointer font-semibold text-base tracking-wide"
               disabled={isPending}>
               {isPending && ( <Spinner className="mr-2 h-4 w-4 animate-spin" />)}
               {isPending ? 'Logging in...' : 'Login'}
               </Button>
 
-
+              <Button type="button" className="w-full bg-[#329344] hover:bg-[#267233] cursor-pointer font-semibold text-base tracking-wide">
+              <Link href="/magic-link">Continue with Magic Link</Link>
+              </Button>
+              
+              
             <SignInWithGoogleButton/> 
             </div>
         </form>
         {/* Signup link */}
         <div className="mt-4 text-center text-sm">
-          Don&apos;t have an account?{" "}
+          <p>Don&apos;t have an account?{" "}
           <Link href="/signup" className="underline text-[#E7473C]">
             Sign up
-          </Link> 
+          </Link></p>
         </div>
       </CardContent>
     </Card>

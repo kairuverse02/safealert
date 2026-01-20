@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { signout } from '@/lib/auth-actions';
 import { Spinner } from '@/components/ui/spinner';
+import { createClient } from '@/lib/supabase/client';
 
 interface NavbarProps {
   user?: {
@@ -19,10 +20,13 @@ export default function Navbar({
   user = { fName: 'John Doe', username: 'johndoe' },
 }: NavbarProps) {
   const router = useRouter();
-  // const supabase = createClient();
+  const supabase = createClient();
   
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [userEmail, setUserEmail] = useState<string>('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [fullName, setFullName] = useState<string>('');
   
   // Track if component is mounted
   const [isMounted, setIsMounted] = useState(false);
@@ -47,7 +51,38 @@ export default function Navbar({
   
   useEffect(() => {
     setIsMounted(true);
-  }, []);
+    
+    // Fetch user data from Supabase
+    const fetchUserData = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (user) {
+          // Set email
+          setUserEmail(user.email || '');
+          
+          // Set full name from user metadata
+          const fullNameFromMetadata = user.user_metadata?.full_name;
+          if (fullNameFromMetadata) {
+            setFullName(fullNameFromMetadata);
+          }
+          
+          // Get Google avatar URL from identities
+          const googleIdentity = user.identities?.find((id: { provider: string }) => id.provider === 'google');
+          if (googleIdentity && googleIdentity.identity_data) {
+            const picture = (googleIdentity.identity_data as Record<string, unknown>)?.picture;
+            if (picture) {
+              setAvatarUrl(picture as string);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching user data:', error);
+      }
+    };
+    
+    fetchUserData();
+  }, [supabase.auth]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -105,9 +140,9 @@ export default function Navbar({
                   className="flex items-center focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-full"
                 >
                   <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold hover:bg-blue-600 transition-colors">
-                    {user.avatarUrl ? (
+                    {avatarUrl ? (
                       <Image
-                        src={user.avatarUrl}
+                        src={avatarUrl}
                         alt="Profile"
                         width={40}
                         height={40}
@@ -128,14 +163,25 @@ export default function Navbar({
                     <div className="px-4 py-3 border-b border-gray-200">
                       <div className="flex items-start space-x-3">
                         <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold flex-shrink-0 cursor-pointer">
-                          <User size={20} />
+                          {avatarUrl ? (
+                            <Image
+                              src={avatarUrl}
+                              alt="Profile"
+                              width={40}
+                              height={40}
+                              unoptimized
+                              className="h-10 w-10 rounded-full object-cover"
+                            />
+                          ) : (
+                            <User size={20} />
+                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate">
-                            Hello, {user.fName}!
+                            Hello, {fullName || user.fName}!
                           </p>
                           <p className="text-sm text-gray-500 truncate">
-                            @{user.username}
+                            {userEmail}
                           </p>
                         </div>
                       </div>

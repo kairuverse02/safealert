@@ -23,7 +23,7 @@ const SignInWithGoogleButton = () => {
     <Button
       type="button"
       variant="outline"
-      className="w-full hover:bg-neutral-200 cursor-pointer"
+      className="w-full hover:bg-neutral-200 cursor-pointer font-semibold text-base tracking-wide"
       onClick={handleGoogleSignIn}
       disabled={isLoading}>
       
