@@ -1,16 +1,13 @@
 🚨 SafeAlert: AI Human Monitoring System
 SafeAlert transforms any browser-enabled device into an intelligent security hub using YOLO real-time object detection. It establishes a secure 1-to-1 link between a Client (Camera) and an Admin (Monitor) to provide automated perimeter security and instant emergency communication.
 
+https://safealert-1s9g9i2b5-safealert.vercel.app
+
 ✨ Key Features
-AI Detection: Real-time human detection and perimeter breach monitoring via YOLO.
-
-Instant QR Pairing: Secure 1-to-1 Admin-Client linking via QR code scanning.
-
-Emergency SOS: Client-side panic button with a 5-second confirmation countdown.
-
-Real-time Alerts: Instant breach notifications powered by Supabase Realtime.
-
-Privacy Control: Clients can toggle camera access or revoke Admin links instantly.
+- Real-time human detection and perimeter breach monitoring via YOLO.
+- Emergency SOS: Client-side panic button with a 5-second confirmation countdown.
+- Real-time Alerts: Instant breach notifications powered by Supabase Realtime.
+- Privacy Control: Clients can toggle camera access or revoke Admin links instantly.
 
 🛠️ Tech Stack
 Frontend: Next.js (App Router), TypeScript, Tailwind CSS
